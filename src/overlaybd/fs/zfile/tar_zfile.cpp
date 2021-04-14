@@ -307,35 +307,11 @@ private:
     }
 
     IFile *open_tar_zfile(IFile *file, const char *path) {
-        if (ZFile::is_zfile(file) == 1) {
-            //a zfile without tar
-            auto zf = ZFile::zfile_open_ro(file, true, true);
-            if (!zf) {
-                delete file;
-                LOG_ERROR_RETURN(0, nullptr, "zfile_open_ro(`) failed, `:`", path, errno, strerror(errno));
-            }
-            return zf;
-        } else {
-            TarFile *tfile = open_tar_file(file);
-            if (!tfile) {
-                delete file;
-                LOG_ERROR_RETURN(0, nullptr, "open_tar_file(`) failed, `:`", path, errno, strerror(errno));
-            }
-            if (ZFile::is_zfile(tfile) == 1) {
-                // a zfile in tar
-                auto zf = ZFile::zfile_open_ro(tfile, true, true);
-                if (!zf) {
-                    delete tfile;
-                    LOG_ERROR_RETURN(0, nullptr, "zfile_open_ro(`) failed, `:`", path, errno, strerror(errno));
-                }
-                return zf;
-            } else {
-                // not a zfile in tar
-                delete tfile;
-                LOG_ERROR_RETURN(0, nullptr, "not a zfile in tar: `", path);
-            }
+        IFile *ret = new_tar_zfile_adaptor(file);
+        if (ret == nullptr) {
+            LOG_ERROR_RETURN(0, nullptr, "error open_tar_zfile(`)", path);
         }
-        return nullptr;
+        return ret;
     }
 };
 
@@ -370,6 +346,38 @@ int is_tar_zfile(IFile *file) {
 IFile *new_tar_file_adaptor(IFile *file) {
     if (is_tar_file(file) == 1) {
         return new TarFile(file);
+    }
+    return nullptr;
+}
+
+IFile *new_tar_zfile_adaptor(IFile *file) {
+    if (ZFile::is_zfile(file) == 1) {
+        //a zfile without tar
+        auto zf = ZFile::zfile_open_ro(file, true, true);
+        if (!zf) {
+            delete file;
+            LOG_ERROR_RETURN(0, nullptr, "zfile_open_ro() failed, `:`", errno, strerror(errno));
+        }
+        return zf;
+    } else {
+        IFile *tfile = new_tar_file_adaptor(file);
+        if (!tfile) {
+            delete file;
+            LOG_ERROR_RETURN(0, nullptr, "new_tar_file_adaptor() failed, `:`", errno, strerror(errno));
+        }
+        if (ZFile::is_zfile(tfile) == 1) {
+            // a zfile in tar
+            auto zf = ZFile::zfile_open_ro(tfile, true, true);
+            if (!zf) {
+                delete tfile;
+                LOG_ERROR_RETURN(0, nullptr, "zfile_open_ro() failed, `:`", errno, strerror(errno));
+            }
+            return zf;
+        } else {
+            // not a zfile in tar
+            delete tfile;
+            LOG_ERROR_RETURN(0, nullptr, "not a zfile in tar");
+        }
     }
     return nullptr;
 }

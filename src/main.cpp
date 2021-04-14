@@ -351,6 +351,7 @@ int main(int argc, char **argv) {
     DEFER(Net::libcurl_fini());
 
     photon::sync_signal(SIGINT, &sigint_handler);
+    photon::sync_signal(SIGTERM, &sigint_handler);
 
     imgservice = create_image_service();
     if (imgservice == nullptr) {

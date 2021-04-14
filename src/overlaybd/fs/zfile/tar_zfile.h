@@ -25,4 +25,5 @@ namespace FileSystem {
     extern "C" int is_tar_file(FileSystem::IFile *file);
     extern "C" int is_tar_zfile(FileSystem::IFile *file);
     extern "C" IFile* new_tar_file_adaptor(FileSystem::IFile *file);
+    extern "C" IFile* new_tar_zfile_adaptor(FileSystem::IFile *file);
 }
