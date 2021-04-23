@@ -338,6 +338,17 @@ void sigint_handler(int signal = SIGINT) {
 
 
 int main(int argc, char **argv) {
+
+    std::string subtype = "overlaybd";
+    if (argc > 2) {
+        LOG_ERROR("invalid param");
+        return -1;
+    }
+    if (argc == 2) {
+        subtype = "i_overlaybd_" + std::string(argv[1]);
+    }
+    LOG_INFO("starting overlaybd tcmu backstore: `", subtype);
+
     mallopt(M_TRIM_THRESHOLD, 128 * 1024);
 
     photon::init();
@@ -405,7 +416,7 @@ int main(int argc, char **argv) {
     struct tcmulib_context *tcmulib_ctx;
     struct tcmulib_handler main_handler;
     main_handler.name = "Handler for overlaybd devices";
-    main_handler.subtype = "overlaybd";
+    main_handler.subtype = subtype.c_str();
     main_handler.cfg_desc = "overlaybd bs";
     main_handler.check_config = nullptr;
     main_handler.added = dev_open;
