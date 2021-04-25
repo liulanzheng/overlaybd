@@ -75,64 +75,10 @@ target_link_libraries(overlaybd-zfile
     -static-libgcc
 )
 
-add_executable(overlaybd-check overlaybd-check.cpp)
-add_dependencies(overlaybd-check RapidJSON)
-target_include_directories(overlaybd-check PUBLIC
-    ${CURL_INCLUDE_DIRS}
-    ${OPENSSL_INCLUDE_DIR}
-    ${RAPIDJSON_INCLUDE_DIR}
-)
-target_link_libraries(overlaybd-check
-    -Wl,--whole-archive
-    base_lib
-    fs_lib
-    photon_lib
-    net_lib
-    image_lib
-    ${CURL_LIBRARY}
-    ${OPENSSL_SSL_LIBRARY}
-    ${OPENSSL_CRYPTO_LIBRARY}
-    -Wl,--no-whole-archive
-    -laio
-    -lrt
-    -lresolv
-    -lpthread
-    -ldl
-    -static-libgcc
-)
-
-add_executable(overlaybd-vsize overlaybd-vsize.cpp)
-add_dependencies(overlaybd-vsize RapidJSON)
-target_include_directories(overlaybd-vsize PUBLIC
-    ${CURL_INCLUDE_DIRS}
-    ${OPENSSL_INCLUDE_DIR}
-    ${RAPIDJSON_INCLUDE_DIR}
-)
-target_link_libraries(overlaybd-vsize
-    -Wl,--whole-archive
-    base_lib
-    fs_lib
-    photon_lib
-    net_lib
-    image_lib
-    ${CURL_LIBRARY}
-    ${OPENSSL_SSL_LIBRARY}
-    ${OPENSSL_CRYPTO_LIBRARY}
-    -Wl,--no-whole-archive
-    -laio
-    -lrt
-    -lresolv
-    -lpthread
-    -ldl
-    -static-libgcc
-)
-
 install(TARGETS
     overlaybd-commit
     overlaybd-create
     overlaybd-info
     overlaybd-zfile
-    overlaybd-check
-    overlaybd-vsize
     DESTINATION /opt/overlaybd/bin
 )

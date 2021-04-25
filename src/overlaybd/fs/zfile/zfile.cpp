@@ -432,6 +432,7 @@ namespace ZFile
                     auto c = crc32c((void *)block.buffer(), block.compressed_size);
                     if (c != block.crc32_code())
                     {
+                        m_file->trim(offset, count);
                         LOG_ERRNO_RETURN(ECHECKSUM, -1, "checksum failed {moffset: `, length: `} (expected ` but got `)",
                                          block.m_reader->m_buf_offset, block.compressed_size, block.crc32_code(), c);
                     }
