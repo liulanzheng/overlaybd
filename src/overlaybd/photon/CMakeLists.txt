@@ -10,10 +10,9 @@ add_library(photon_lib STATIC
     ${SOURCE_SYNCIO}
     "switch_context.s"
 )
-add_dependencies(photon_lib Boost)
+
 target_include_directories(photon_lib PUBLIC
     ${AIO_INCLUDE_DIR}
-    ${BOOST_INCLUDE_DIR}
     ${CURL_INCLUDE_DIRS}
 )
 
