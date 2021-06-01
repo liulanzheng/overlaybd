@@ -203,7 +203,7 @@ ISwitchFile *new_switch_file(IFile *file, bool local, const char* filepath) {
     // if tar file, open tar file
     file = FileSystem::new_tar_file_adaptor(file);
     // open zfile
-    auto zf = ZFile::zfile_open_ro(file, local ? false : true, true);
+    auto zf = ZFile::zfile_open_ro(file, false, /*local ? false : true,*/ true);
     if (!zf) {
         LOG_ERROR_RETURN(0, nullptr, "zfile_open_ro failed, error: `(`)", errno,
                                     strerror(errno));
