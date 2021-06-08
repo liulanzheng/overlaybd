@@ -33,6 +33,9 @@ namespace FileSystem {
         }
         std::string key;
         int ref_count = 0;
+        IFile* get_file() {
+            return m_file;
+        }
     };
 }
 

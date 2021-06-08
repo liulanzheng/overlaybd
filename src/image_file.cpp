@@ -247,11 +247,13 @@ LSMT::IFileRO *ImageFile::open_lowers(std::vector<ImageConfigNS::LayerConfig> &l
             return nullptr;
         }
     }
+    // no concurrent for dev open, no need to lock
     auto it = image_service.opened_lowers.find(lowers_key);
     if (it != image_service.opened_lowers.end()) {
         it->second->ref_count++;
         LOG_INFO("return shared lowers `", lowers_key);
-        return (LSMT::IFileRO*)(it->second);
+        // return base type
+        return (LSMT::IFileRO*)(it->second->get_file());
     }
 
     photon::join_handle *ths[PARALLEL_LOAD_INDEX];
@@ -294,7 +296,7 @@ LSMT::IFileRO *ImageFile::open_lowers(std::vector<ImageConfigNS::LayerConfig> &l
 
     image_service.opened_lowers[lowers_key] = new FileSystem::RefFile(ret, lowers_key);
     LOG_INFO("LSMT::open_files_ro(files, `) success", lowers.size());
-    return (LSMT::IFileRO*)image_service.opened_lowers[lowers_key];
+    return ret;
 
 ERROR_EXIT:
     if (m_exception == "") {
@@ -327,9 +329,9 @@ void ImageFile::__close_opened_files() {
 }
 
 LSMT::IFileRW *ImageFile::open_upper(ImageConfigNS::UpperConfig &upper) {
-    FileSystem::IFile *data_file = NULL;
-    FileSystem::IFile *idx_file = NULL;
-    LSMT::IFileRW *ret = NULL;
+    FileSystem::IFile *data_file = nullptr;
+    FileSystem::IFile *idx_file = nullptr;
+    LSMT::IFileRW *ret = nullptr;
 
     LOG_INFO("upper layer : ` , `", upper.index(), upper.data());
 
@@ -360,7 +362,7 @@ ERROR_EXIT:
     delete data_file;
     delete idx_file;
     delete ret;
-    return NULL;
+    return nullptr;
 }
 
 int ImageFile::init_image_file() {
@@ -427,7 +429,7 @@ SUCCESS_EXIT:
     if (conf.download().enable() && !record_no_download) {
         // start_bk_dl_thread();
     }
-    return 0;
+    return 1;
 
 ERROR_EXIT:
     return -1;

@@ -1234,7 +1234,7 @@ IFileRW *stack_files(IFileRW *upper_layer, IFileRO *lower_layers, bool ownership
         if (verify_order(rst->m_files, rst->m_uuid, 1) == false)
             return nullptr;
     } else {
-        LOG_WARN("STACK FILES WITHOUT CHECK ORDER!!!");
+        LOG_DEBUG("stack files without checking order");
     }
     rst->m_files.insert(rst->m_files.begin(), u->m_files[0]);
     rst->m_uuid.insert(rst->m_uuid.begin(), u->m_uuid[0]);
