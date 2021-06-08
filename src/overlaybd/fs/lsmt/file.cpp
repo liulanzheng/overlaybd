@@ -1239,8 +1239,9 @@ IFileRW *stack_files(IFileRW *upper_layer, IFileRO *lower_layers, bool ownership
     rst->m_files.insert(rst->m_files.begin(), u->m_files[0]);
     rst->m_uuid.insert(rst->m_uuid.begin(), u->m_uuid[0]);
     u->m_index = l->m_index = nullptr;
-    l->m_file_ownership = u->m_file_ownership = false;
+
     if (ownership) {
+        l->m_file_ownership = u->m_file_ownership = false;
         delete u;
         delete l;
     }
