@@ -52,29 +52,16 @@ public:
     }
 
     ~ImageFile() {
-        LOG_INFO("delete image file `", lowersKey);
-
-        auto it = image_service.opened_lowers.find(lowersKey);
-        if (it != image_service.opened_lowers.end()) {
-            int ref = --it->second->ref_count;
-            if (ref == 0) {
-                LOG_INFO("delete lower_files `", it->second->key);
-                delete it->second;
-                image_service.opened_lowers.erase(it);
-
-                for (int i = 0; i < lower_file_keys.size(); i++) {
-                    std::string &key = lower_file_keys[i];
-                    LOG_INFO("delete file for key `", key);
-                    auto it = image_service.opened_files.find(key);
-                    if (it == image_service.opened_files.end())
-                        continue;
-                    int ref = --it->second->ref_count;
-                    LOG_INFO("delete file ref `", ref);
-                    if (ref == 0) {
-                        LOG_INFO("delete file `", it->second->key);
-                        delete it->second;
-                        image_service.opened_files.erase(it);
-                    }
+        LOG_INFO("delete image file `", lowers_key);
+        if (lowers_key != "") {
+            auto it = image_service.opened_lowers.find(lowers_key);
+            if (it != image_service.opened_lowers.end()) {
+                int ref = --it->second->ref_count;
+                if (ref == 0) {
+                    LOG_INFO("delete lower_files `", it->second->key);
+                    delete it->second;
+                    image_service.opened_lowers.erase(it);
+                    __close_opened_files();
                 }
             }
         }
@@ -137,7 +124,7 @@ private:
     ImageService &image_service;
     LSMT::IFileRW *upper_file = nullptr;
     LSMT::IFileRO *lower_file = nullptr;
-    std::string lowersKey;
+    std::string lowers_key;
     std::vector<std::string> lower_file_keys;
 
     int init_image_file();
@@ -150,4 +137,5 @@ private:
                                         const std::string &, const uint64_t, int);
     FileSystem::IFile *__open_ro_remote_share(const std::string &dir,
                                         const std::string &, const uint64_t);
+    void __close_opened_files();
 };

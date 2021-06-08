@@ -283,6 +283,7 @@ ImageFile *ImageService::create_image_file(const char *config_path) {
     if (ret->m_status <= 0) {
         std::string data = "failed:" + ret->m_exception;
         set_result_file(resFile, data);
+        LOG_INFO("rollback delete image file");
         delete ret;
         return NULL;
     }

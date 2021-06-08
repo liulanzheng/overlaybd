@@ -81,15 +81,17 @@ public:
         }
 
         // if tar file, open tar file
-        file = FileSystem::new_tar_file_adaptor(file);
+        // file = FileSystem::new_tar_file_adaptor(file);
         //open zfile
-        auto zf = ZFile::zfile_open_ro(file, false, true);
-        if (!zf) {
-            delete file;
-            LOG_ERROR_RETURN(0, -1, "zfile_open_ro failed, path: `: error: `(`)", filepath, errno,
-                                    strerror(errno));
+        if (ZFile::is_zfile(file) == 1) {
+            auto zf = ZFile::zfile_open_ro(file, false, true);
+            if (!zf) {
+                delete file;
+                LOG_ERROR_RETURN(0, -1, "zfile_open_ro(`) failed, error: `(`)", filepath, errno,
+                                        strerror(errno));
+            }
+            file = zf;
         }
-        file = zf;
 
         LOG_INFO("switch to localfile '`' success.", filepath);
         m_old = m_file;
@@ -201,14 +203,16 @@ public:
 
 ISwitchFile *new_switch_file(IFile *file, bool local, const char* filepath) {
     // if tar file, open tar file
-    file = FileSystem::new_tar_file_adaptor(file);
+    // file = FileSystem::new_tar_file_adaptor(file);
     // open zfile
-    auto zf = ZFile::zfile_open_ro(file, false, /*local ? false : true,*/ true);
-    if (!zf) {
-        LOG_ERROR_RETURN(0, nullptr, "zfile_open_ro failed, error: `(`)", errno,
+    if (ZFile::is_zfile(file) == 1) {
+        auto zf = ZFile::zfile_open_ro(file, false, true);
+        if (!zf) {
+            LOG_ERROR_RETURN(0, nullptr, "zfile_open_ro failed, error: `(`)", errno,
                                     strerror(errno));
+        }
+        file = zf;
     }
-    file = zf;
     return new SwitchFile(file, local, filepath);
 }
 
