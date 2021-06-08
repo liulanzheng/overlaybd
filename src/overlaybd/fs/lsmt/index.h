@@ -134,15 +134,6 @@ public:
     virtual int backing_index(const IMemoryIndex *bi) = 0;
     virtual const IMemoryIndex *backing_index() const = 0;
     virtual const IMemoryIndex0 *front_index() const = 0;
-
-    // dump index0 which needs to compact
-    // and then clear the original index0.
-    // virtual IMemoryIndex0* gc_index() = 0;
-    virtual IMemoryIndex *load_range_index(int, int) const = 0;
-
-    // rebuild backing index before async-compact.
-    // merge the image's backing_index and gc_idx( dump from original index0 ) for pread()
-    virtual int start_gc(const IMemoryIndex *, std::size_t files_size) = 0;
 };
 
 // create writable level 0 memory index from an array of mappings;

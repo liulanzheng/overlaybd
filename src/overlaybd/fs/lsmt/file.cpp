@@ -177,6 +177,7 @@ public:
         close();
         if (m_file_ownership) {
             LOG_DEBUG("m_file_ownership:`, m_files.size:`", m_file_ownership, m_files.size());
+            delete m_index;
             for (auto &x : m_files)
                 safe_delete(x);
         }
@@ -570,7 +571,6 @@ public:
 
     atomic_uint64_t m_compacted_idx_size; // count of compacted raw-index
 
-    bool m_init_concurrency = false;
     uint64_t m_data_offset = HeaderTrailer::SPACE / ALIGNMENT;
 
     Mutex m_rw_mtx;
@@ -602,14 +602,6 @@ public:
         }
 
         m_stacked_mappings.resize(buffer_size);
-        return 0;
-    }
-
-    virtual int init_concurrency() {
-        if (m_init_concurrency)
-            return 0;
-        LOG_DEBUG("Initialize concurrency variables (mutex & cond).");
-        m_init_concurrency = true;
         return 0;
     }
 
@@ -1217,7 +1209,7 @@ IFileRW *stack_files(IFileRW *upper_layer, IFileRO *lower_layers, bool ownership
     if (pht == nullptr) {
         LOG_ERRNO_RETURN(0, nullptr, "verify upper layer's Header failed.");
     }
-    auto idx = create_combo_index((IMemoryIndex0 *)u->m_index, l->m_index, true);
+    auto idx = create_combo_index((IMemoryIndex0 *)u->m_index, l->m_index, ownership);
     LSMTFile *rst = new LSMTFile;
     rst->m_index = idx;
     rst->m_findex = u->m_findex;
@@ -1238,9 +1230,9 @@ IFileRW *stack_files(IFileRW *upper_layer, IFileRO *lower_layers, bool ownership
     }
     rst->m_files.insert(rst->m_files.begin(), u->m_files[0]);
     rst->m_uuid.insert(rst->m_uuid.begin(), u->m_uuid[0]);
-    u->m_index = l->m_index = nullptr;
 
     if (ownership) {
+        u->m_index = l->m_index = nullptr;
         l->m_file_ownership = u->m_file_ownership = false;
         delete u;
         delete l;

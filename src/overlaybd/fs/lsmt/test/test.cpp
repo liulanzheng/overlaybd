@@ -158,7 +158,6 @@ TEST(Layered, Indexes) {
         auto ci = create_combo_index(idx0, mi, false);
         EXPECT_EQ(idx0->backing_index(mi), -1);
         EXPECT_EQ(idx0->increase_tag(1), -1);
-        EXPECT_EQ(idx0->load_range_index(0, 1000), nullptr);
         EXPECT_EQ(idx0->backing_index(), nullptr);
 
         for (int i = 0; i < FLAGS_nwrites; ++i) {
@@ -170,20 +169,6 @@ TEST(Layered, Indexes) {
         for (int i = 0; i < FLAGS_nwrites / 2; ++i)
             do_randread(ci, moffsets);
         auto p = ci->dump();
-        auto ri = ci->load_range_index(0, 100);
-        if (ri) {
-            auto ridx = ptr_array(ri->buffer(), ri->size());
-            auto backing_idx = ci->backing_index();
-            auto mdump = backing_idx->buffer();
-            EXPECT_EQ(ri->size(), backing_idx->size());
-            int i = 0;
-            for (auto idx : ridx) {
-                EXPECT_EQ(idx.offset, mdump[i].offset);
-                i++;
-            }
-            LOG_INFO(backing_idx->front());
-            LOG_INFO(backing_idx->back());
-        }
         auto idx = create_level_index(p, ci->size(), 0, UINT64_MAX, false);
         delete ci;
         delete mi;
