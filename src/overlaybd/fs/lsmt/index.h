@@ -113,7 +113,7 @@ public:
     virtual int increase_tag(int delta = 1) = 0;
 
     // number of 512B blocks allocated
-    virtual uint64_t block_count() = 0;
+    virtual uint64_t block_count() const = 0;
 };
 
 // the level 0 memory index, which supports write
@@ -134,6 +134,12 @@ public:
     virtual int backing_index(const IMemoryIndex *bi) = 0;
     virtual const IMemoryIndex *backing_index() const = 0;
     virtual const IMemoryIndex0 *front_index() const = 0;
+
+    // dump index0 which needs to compact
+    // and then clear the original index0.
+    // virtual IMemoryIndex0* gc_index() = 0;
+    virtual IMemoryIndex *load_range_index(int, int) const = 0;
+
 };
 
 // create writable level 0 memory index from an array of mappings;
@@ -163,7 +169,7 @@ extern "C" IMemoryIndex *merge_memory_indexes(const IMemoryIndex **pindexes, std
 // were one single index; inserting into a combo effectively inserting into the index0 part;
 // the mapped offset must be within [moffset_begin, moffset_end)
 extern "C" IComboIndex *create_combo_index(IMemoryIndex0 *index0, const IMemoryIndex *index,
-                                           bool ownership);
+                                           uint8_t ro_index_count, bool ownership);
 
 // compress raw index array by mergeing adjacent continuous mappings
 // returning compressed size of the array

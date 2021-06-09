@@ -90,7 +90,7 @@ public:
             pbegin = pend = nullptr;
     }
 
-    virtual uint64_t block_count() override {
+    virtual uint64_t block_count() const override {
         return alloc_blk;
     }
 
@@ -354,7 +354,7 @@ public:
         return rst;
     }
 
-    virtual uint64_t block_count() override {
+    virtual uint64_t block_count() const override {
         return alloc_blk.m_alloc;
     }
 
@@ -375,6 +375,7 @@ public:
     iterator end() const {
         return mapping.end();
     }
+
     UNIMPLEMENTED(int backing_index(const IMemoryIndex *bi) override);
     UNIMPLEMENTED(int increase_tag(int) override);
 
@@ -394,7 +395,7 @@ public:
     Index *m_backing_index{nullptr};
     bool m_ownership;
 
-    ComboIndex(Index0 *index0, const Index *index, bool ownership) {
+    ComboIndex(Index0 *index0, const Index *index, uint8_t ro_layers_count, bool ownership) {
         m_index0 = index0;
         m_backing_index = const_cast<Index *>(index);
         mapping = index0->mapping;
@@ -402,9 +403,9 @@ public:
 
         // TODO set tag value
         for (auto &x : mapping)
-            ((SegmentMapping &)x).tag = 0;
-        for (auto &x : *m_backing_index)
-            ((SegmentMapping &)x).tag++;
+            ((SegmentMapping &)x).tag = ro_layers_count;
+        // for (auto &x : *m_backing_index)
+        //     ((SegmentMapping &)x).tag++;
     }
     ~ComboIndex() {
         if (m_ownership) {
@@ -467,6 +468,33 @@ public:
 
     virtual const IMemoryIndex *backing_index() const override {
         return m_backing_index;
+    }
+
+    virtual IMemoryIndex *load_range_index(int min_level, int max_level) const override {
+        if (min_level >= max_level) {
+            return nullptr;
+        }
+        LOG_DEBUG("` <= m.tag <= `", min_level, max_level - 1);
+        vector<SegmentMapping> range_index{};
+        auto index = m_backing_index->buffer();
+        for (auto m : ptr_array(index, m_backing_index->size())) {
+            if (((int)m.tag) >= min_level && ((int)m.tag) < max_level) {
+                range_index.push_back(m);
+            }
+        }
+        LOG_INFO("index size in range[`,`): `", min_level, max_level - 1, range_index.size());
+        if (!range_index.size()) {
+            LOG_DEBUG("return NULL");
+            return nullptr;
+        }
+        return new Index(std::move(range_index));
+    }
+
+    virtual Index *rebuild_backing_index(Index *highlevel_idx, size_t max_level) {
+        vector<SegmentMapping> mappings;
+        const Index *indexes[2] = {highlevel_idx, const_cast<Index *>(m_backing_index)};
+        merge_indexes(0, mappings, indexes, 2, 0, UINT64_MAX, false, max_level);
+        return new Index(std::move(mappings));
     }
 };
 
@@ -576,13 +604,13 @@ static void merge_indexes(uint8_t level, vector<SegmentMapping> &mapping, const 
     }
 }
 
-IComboIndex *create_combo_index(IMemoryIndex0 *index0, const IMemoryIndex *index, bool ownership) {
+IComboIndex *create_combo_index(IMemoryIndex0 *index0, const IMemoryIndex *index, uint8_t ro_index_count, bool ownership) {
     if (!index0 || !index)
         LOG_ERROR_RETURN(EINVAL, nullptr, "invalid argument(s)");
 
     auto i0 = (Index0 *)index0;
     auto i1 = (Index *)index;
-    return new ComboIndex(i0, i1, ownership);
+    return new ComboIndex(i0, i1, ro_index_count, ownership);
 }
 
 size_t compress_raw_index(SegmentMapping *mapping, size_t n) {
