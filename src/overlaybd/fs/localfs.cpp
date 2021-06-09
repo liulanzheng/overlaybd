@@ -177,7 +177,7 @@ namespace FileSystem
         }
         virtual ssize_t pread(void *buf, size_t count, off_t offset) override
         {
-            thread_yield();
+            // thread_yield();
             return UISysCall(::pread(fd, buf, count, offset));
         }
         virtual ssize_t pwrite(const void *buf, size_t count, off_t offset) override

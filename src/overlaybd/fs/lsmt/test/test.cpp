@@ -492,7 +492,7 @@ TEST_F(FileTest3, stack_files) {
     CleanUp();
     cout << "generating " << FLAGS_layers << " RO layers by randwrite()" << endl;
     for (int i = 0; i < FLAGS_layers; ++i) {
-        files[i] = create_commit_layer(0, 1 /*libaio*/);
+        files[i] = create_commit_layer(0, ut_io_engine);
     }
 
     cout << "merging RO layers as " << fn_merged << endl;
@@ -546,7 +546,7 @@ TEST_F(FileTest3, stack_files_with_zfile_checksum) {
     CleanUp();
     cout << "generating " << FLAGS_layers << " RO layers by randwrite()" << endl;
     for (int i = 0; i < FLAGS_layers; ++i) {
-        files[i] = create_commit_layer(0, 0 , true,
+        files[i] = create_commit_layer(0, ut_io_engine , true,
                                        true);
     }
     cout << "verifying stacked RO layers file" << endl;
@@ -583,21 +583,18 @@ TEST_F(FileTest3, photon_verify) {
     LOG_INFO("start multi-threads test, jobs: `", thread_cnt);
     vector<photon::thread *> threads;
     errno = 0;
-
     for (int i = 0; i < thread_cnt; i++) {
-
         threads.push_back(photon::thread_create11(&FileTest2::randwrite, (FileTest2 *)this,
                                                   flsmt.get(), FLAGS_nwrites / thread_cnt));
         photon::thread_enable_join(threads.back());
     }
-    auto stat = flsmt->data_stat();
-    LOG_INFO("valid_size: `", stat.valid_data_size);
-
+    for (auto thd : threads)
+        thread_join((photon::join_handle *)thd);
     if (errno != 0) {
         LOG_INFO("previous err: `(`)", errno, strerror(errno));
     }
-    for (auto thd : threads)
-        thread_join((photon::join_handle *)thd);
+    auto stat = flsmt->data_stat();
+    LOG_INFO("valid_size: `", stat.valid_data_size);
     if (errno != 0) {
         LOG_INFO("previous err: `(`)", errno, strerror(errno));
     }

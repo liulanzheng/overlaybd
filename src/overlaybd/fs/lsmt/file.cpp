@@ -262,10 +262,10 @@ public:
                 }
                 assert(m.tag < m_files.size());
                 ssize_t size = m.length * ALIGNMENT;
-                LOG_DEBUG("offse: `, length: `", m.moffset, size);
+                LOG_DEBUG("offset: `, length: `", m.moffset, size);
                 ssize_t ret = m_files[m.tag]->pread(buf, size, m.moffset * ALIGNMENT);
                 if (ret < size) {
-                    LOG_ERROR_RETURN(0, (int)ret,
+                    LOG_ERRNO_RETURN(0, (int)ret,
                                      "failed to read from `-th file ( ` pread return: ` < size: `)",
                                      m.tag, m_files[m.tag], ret, size);
                 }
@@ -277,7 +277,7 @@ public:
         return (ret >= 0) ? nbytes : ret;
     }
 
-    IFile *front_file() {
+    virtual IFile *front_file() {
         for (auto x : m_files)
             if (x)
                 return x;
@@ -592,6 +592,13 @@ public:
         close();
     }
 
+    virtual IFile *front_file() override {
+        if (m_files[m_rw_tag]) {
+            return m_files[m_rw_tag];
+        }
+        return nullptr;
+    }
+
     virtual int vioctl(int request, va_list args) override {
         if (request != Index_Group_Commit)
             LOG_ERROR_RETURN(EINVAL, -1, "invaid request code");
@@ -679,35 +686,37 @@ public:
     virtual ssize_t pwrite(const void *buf, size_t count, off_t offset) override {
         LOG_DEBUG("{offset:`,length:`}", offset, count);
         CHECK_ALIGNMENT(count, offset);
-
         auto bytes = count;
-        while (count > MAX_IO_SIZE) {
+        while (count > MAX_IO_SIZE)
+        {
             auto ret = pwrite(buf, MAX_IO_SIZE, offset);
-            if (ret < (ssize_t)MAX_IO_SIZE)
-                return -1;
-            (char *&)buf += MAX_IO_SIZE;
+            if (ret < (ssize_t)MAX_IO_SIZE) return -1;
+            (char*&)buf += MAX_IO_SIZE;
             count -= MAX_IO_SIZE;
             offset += MAX_IO_SIZE;
         }
-        // wait unlock
+        //wait unlock
         off_t moffset = -1;
         {
             Lock lock(m_rw_mtx);
-            moffset = append(m_files[0], buf, count);
-            if (moffset == 0)
-                return -1;
-             m_vsize = max(m_vsize, count + offset);
-            if (m_vsize < count + offset) {
-                LOG_INFO("resize m_vsize: `->`", m_vsize, count + offset);
+            moffset = append(m_files[m_rw_tag], buf, count);
+            if (moffset == 0) return -1;
+            m_vsize = max(m_vsize, count + offset);
+            if (m_vsize<count+offset){
+                LOG_INFO("resize m_visze: `->`", m_vsize, count+offset);
             }
-            SegmentMapping m{(uint64_t)offset / (uint64_t)ALIGNMENT,
-                            (uint32_t)count / (uint32_t)ALIGNMENT,
-                            (uint64_t)moffset / (uint64_t)ALIGNMENT};
-            assert(m.length > (uint32_t)0);
+            SegmentMapping m{
+                (uint64_t)offset  / (uint64_t)ALIGNMENT,
+                (uint32_t)count   / (uint32_t)ALIGNMENT,
+                (uint64_t)moffset / (uint64_t)ALIGNMENT,
+            };
+            m.tag = m_rw_tag;
+            assert(m.length>(uint32_t)0);
             m_data_offset = m.mend();
-            static_cast<IMemoryIndex0 *>(m_index)->insert(m);
+            static_cast<IMemoryIndex0*>(m_index)->insert(m);
             append_index(m);
         }
+
         return bytes;
     }
 
@@ -783,7 +792,7 @@ public:
         LayerInfo layer;
         if (load_layer_info(& m_files[m_rw_tag], 1, layer, true) != 0)
             return -1;
-        ret = write_header_trailer(m_files[0], false, true, true, index_offset, m_index0->size(),
+        ret = write_header_trailer(m_files[m_rw_tag], false, true, true, index_offset, m_index0->size(),
                                    layer);
         if (ret < 0)
             LOG_ERRNO_RETURN(0, -1, "failed to write trailer.");
