@@ -72,22 +72,23 @@ public:
     uint64_t vsize = FLAGS_vsize << 20;
     uint32_t IMAGE_RO_LAYERS = FLAGS_layers;
 
+    int ut_io_engine = 0;
     int next_layer_id = 0;
     int current_layer_id = 0;
     string parent_uuid;
 
     virtual void SetUp() override {
 
-        auto io_engine = ioengine_psync;
+        // io_engine = ioengine_psync;
         if (FLAGS_io_engine == "libaio") {
-            io_engine = ioengine_libaio;
+            ut_io_engine = ioengine_libaio;
         }
         if (FLAGS_io_engine == "posixaio") {
-            io_engine = ioengine_posixaio;
+            ut_io_engine = ioengine_posixaio;
         }
-        LOG_INFO("create localfs_adaptor (io_engine = `).", io_engine);
+        LOG_INFO("create localfs_adaptor (io_engine = `).", ut_io_engine);
 
-        lfs = new_localfs_adaptor("/tmp", io_engine);
+        lfs = new_localfs_adaptor("/tmp", ut_io_engine);
 
         memset(buf, 0, PREAD_LEN);
     }
@@ -469,7 +470,7 @@ public:
             return dst;
         }
         return FileSystem::open_localfile_adaptor(("/tmp/" + layer_name.back()).c_str(), O_RDONLY,
-                                                  420U, ioengine_libaio);
+                                                  420U, io_engine);
     }
 
     virtual IFileRO *create_image(int total_layers) {
