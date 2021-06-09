@@ -71,6 +71,8 @@ public:
         }
 
         delete m_prefetcher;
+
+        image_service.clean_checksum();
     }
 
     int fstat(struct stat *buf) override {
@@ -133,9 +135,9 @@ private:
                                bool &);
     LSMT::IFileRW *open_upper(ImageConfigNS::UpperConfig &);
     FileSystem::IFile *__open_ro_file(const std::string &);
-    FileSystem::IFile *__open_ro_remote(const std::string &dir,
+    FileSystem::IFile *__open_ro_dir(const std::string &dir,
                                         const std::string &, const uint64_t, int);
-    FileSystem::IFile *__open_ro_remote_share(const std::string &dir,
+    FileSystem::IFile *__open_ro_dir_share(const std::string &dir,
                                         const std::string &, const uint64_t);
     void __close_opened_files();
 };

@@ -6,12 +6,14 @@ add_subdirectory(registryfs)
 add_subdirectory(lsmt)
 add_subdirectory(zfile)
 add_subdirectory(cache)
+add_subdirectory(checkedfs)
 
 target_link_libraries(fs_lib
     registryfs_lib
     lsmt_lib
     zfile_lib
     cache_lib
+    checkedfs_lib
 )
 
 if(BUILD_TESTING)

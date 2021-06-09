@@ -38,7 +38,7 @@
 
 #define PARALLEL_LOAD_INDEX 32
 const std::string COMMIT_FILE_NAME = ".commit";
-
+const std::string CHECKSUM_FILE_NAME = ".checksum";
 
 
 FileSystem::IFile *ImageFile::__open_ro_file(const std::string &path) {
@@ -82,7 +82,7 @@ FileSystem::IFile *ImageFile::__open_ro_file(const std::string &path) {
     return switch_file;
 }
 
-FileSystem::IFile *ImageFile::__open_ro_remote_share(const std::string &dir,
+FileSystem::IFile *ImageFile::__open_ro_dir_share(const std::string &dir,
                                 const std::string &digest, const uint64_t size) {
     auto it = image_service.opened_files.find(dir);
     if (it != image_service.opened_files.end()) {
@@ -98,6 +98,12 @@ FileSystem::IFile *ImageFile::__open_ro_remote_share(const std::string &dir,
         LOG_INFO("add opened file for `", dir);
         image_service.opened_files[dir] = rfile;
         return rfile;
+    }
+
+    std::string checksum_file_path = dir + "/" + CHECKSUM_FILE_NAME;
+    if (access(checksum_file_path.c_str(), F_OK) == 0) {
+        LOG_INFO("use checksum file: ` ", checksum_file_path);
+        image_service.copy_checksum_file(checksum_file_path.c_str(), digest.c_str());
     }
 
     std::string url;
@@ -138,10 +144,10 @@ FileSystem::IFile *ImageFile::__open_ro_remote_share(const std::string &dir,
     return rfile;
 }
 
-FileSystem::IFile *ImageFile::__open_ro_remote(const std::string &dir, const std::string &digest,
+FileSystem::IFile *ImageFile::__open_ro_dir(const std::string &dir, const std::string &digest,
                                                const uint64_t size, int layer_index) {
 
-    FileSystem::IFile *file = __open_ro_remote_share(dir, digest, size);
+    FileSystem::IFile *file = __open_ro_dir_share(dir, digest, size);
     if (file == nullptr) {
         LOG_ERROR_RETURN(0, nullptr, "failed to open_ro_remote_share for `", dir);
     }
@@ -209,7 +215,7 @@ int ImageFile::open_lower_layer(FileSystem::IFile *&file, ImageConfigNS::LayerCo
     } else {
         // open downloaded blob or remote blob
         opened = layer.digest();
-        file = __open_ro_remote(layer.dir(), layer.digest(), layer.size(), index);
+        file = __open_ro_dir(layer.dir(), layer.digest(), layer.size(), index);
     }
     if (file != nullptr) {
         LOG_DEBUG("layer index: `, open(`) success", index, opened);

@@ -49,6 +49,7 @@ struct GlobalFs {
     FileSystem::IFileSystem *remote_fs = nullptr;
     FileSystem::IFileSystem *cachefs = nullptr;
     FileSystem::IFileSystem *srcfs = nullptr;
+    FileSystem::IFileSystem *localfs = nullptr;
 };
 
 struct ImageFile;
@@ -58,6 +59,9 @@ public:
     ImageService() {}
     int init();
     ImageFile *create_image_file(const char *config_path);
+    bool create_dir(const char *dirname);
+    bool copy_checksum_file(const char*, const char*);
+    void clean_checksum();
     ImageConfigNS::GlobalConfig global_conf;
     struct GlobalFs global_fs;
     unordered_map_string_key<FileSystem::RefFile *> opened_files;

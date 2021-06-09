@@ -23,6 +23,7 @@
 #include "overlaybd/fs/filesystem.h"
 #include "overlaybd/fs/localfs.h"
 #include "overlaybd/fs/registryfs/registryfs.h"
+#include "overlaybd/fs/checkedfs/checkedfs.h"
 #include "overlaybd/fs/tar_file.h"
 #include "overlaybd/fs/zfile/zfile.h"
 #include "overlaybd/photon/thread.h"
@@ -35,29 +36,14 @@
 #include <unistd.h>
 #include <vector>
 
-const char *DEFAULT_CONFIG_PATH = "/etc/overlaybd/overlaybd.json";
+const std::string DEFAULT_CONFIG_PATH = "/etc/overlaybd/overlaybd.json";
+const std::string DEFAULT_CHECKSUM_PATH = "/opt/overlaybd/checksum/";
 const int LOG_SIZE_MB = 10;
 const int LOG_NUM = 3;
 
 struct ImageRef {
     std::vector<std::string> seg; // cr: seg_0, ns: seg_1, repo: seg_2
 };
-
-bool create_dir(const char *dirname) {
-    auto lfs = FileSystem::new_localfs_adaptor();
-    if (lfs == nullptr) {
-        LOG_ERRNO_RETURN(0, false, "new localfs_adaptor failed");
-    }
-    DEFER(delete lfs);
-    if (lfs->access(dirname, 0) == 0) {
-        return true;
-    }
-    if (lfs->mkdir(dirname, 0644) == 0) {
-        LOG_INFO("dir ` doesn't exist. create succ.", dirname);
-        return true;
-    }
-    LOG_ERRNO_RETURN(0, false, "dir ` doesn't exist. create failed.", dirname);
-}
 
 int parse_blob_url(const std::string &url, struct ImageRef &ref) {
     for (auto prefix : std::vector<std::string>{"http://", "https://"}) {
@@ -130,6 +116,17 @@ int load_cred_from_file(const std::string path, const std::string &remote_path,
     }
 
     return -1;
+}
+
+bool ImageService::create_dir(const char *dirname) {
+    if (global_fs.localfs->access(dirname, 0) == 0) {
+        return true;
+    }
+    if (global_fs.localfs->mkdir(dirname, 0644) == 0) {
+        LOG_INFO("dir ` doesn't exist. create succ.", dirname);
+        return true;
+    }
+    LOG_ERRNO_RETURN(0, false, "dir ` doesn't exist. create failed.", dirname);
 }
 
 int ImageService::read_global_config_and_set() {
@@ -205,12 +202,29 @@ void ImageService::set_result_file(std::string &filename, std::string &data) {
               data.c_str());
 }
 
+static std::string meta_name_trans(const char *fn) {
+    std::string ret(fn);
+    std::string kw = "/sha256:";
+    auto p = ret.find(kw);
+    if (p == std::string::npos) {
+        return ret;
+    }
+    LOG_DEBUG("` -> `", fn, ret.substr(p));
+    return ret.substr(p);
+}
+
 int ImageService::init() {
     if (read_global_config_and_set() < 0) {
         return -1;
     }
 
+    if (global_fs.localfs == nullptr) {
+        global_fs.localfs = FileSystem::new_localfs_adaptor(nullptr, 0);
+    }
+
     if (create_dir(global_conf.registryCacheDir().c_str()) == false)
+        return -1;
+    if (create_dir(DEFAULT_CHECKSUM_PATH.c_str()) == false)
         return -1;
 
     if (global_fs.remote_fs == nullptr) {
@@ -229,16 +243,15 @@ int ImageService::init() {
             LOG_ERROR_RETURN(0, -1, "create registryfs failed.");
         }
 
-        // auto tar_fs = FileSystem::new_tar_fs_adaptor(registry_fs);
-        // if (tar_fs == nullptr) {
-        //     delete registry_fs;
-        //     LOG_ERROR_RETURN(0, -1, "create tar_fs failed.");
-        // }
+        auto metafs = FileSystem::new_localfs_adaptor(DEFAULT_CHECKSUM_PATH.c_str());
+        LOG_INFO("create checkedfs, checksum path: `", DEFAULT_CHECKSUM_PATH);
+        auto checkedfs = FileSystem::new_checkedfs_adaptor_v1(registry_fs, metafs, meta_name_trans);
 
         auto registry_cache_fs = FileSystem::new_localfs_adaptor(
             global_conf.registryCacheDir().c_str());
         if (registry_cache_fs == nullptr) {
             delete registry_fs;
+            delete checkedfs;
             LOG_ERROR_RETURN(0, -1, "new_localfs_adaptor for ` failed",
                              global_conf.registryCacheDir().c_str());
             return false;
@@ -247,12 +260,13 @@ int ImageService::init() {
         LOG_INFO("create cache with size: ` GB",
                  global_conf.registryCacheSizeGB());
         global_fs.remote_fs = FileSystem::new_full_file_cached_fs(
-            registry_fs, registry_cache_fs, 256 * 1024 /* refill unit 256KB */,
+            checkedfs, registry_cache_fs, 256 * 1024 /* refill unit 256KB */,
             global_conf.registryCacheSizeGB() /*GB*/, 10000000,
             (uint64_t)1048576 * 4096, nullptr);
 
         if (global_fs.remote_fs == nullptr) {
             delete registry_fs;
+            delete checkedfs;
             delete registry_cache_fs;
             LOG_ERROR_RETURN(0, -1,
                              "create remotefs (registryfs + cache) failed.");
@@ -292,6 +306,49 @@ ImageFile *ImageService::create_image_file(const char *config_path) {
     return ret;
 }
 
+void ImageService::clean_checksum() {
+    auto dirp = global_fs.localfs->opendir(DEFAULT_CHECKSUM_PATH.c_str());
+    if (dirp == nullptr) {
+        LOG_ERROR("open checksumdir ` failed.", dirp);
+        return;
+    }
+    DEFER(global_fs.localfs->closedir(dirp));
+    auto ent = global_fs.localfs->readdir(dirp);
+    while (ent != nullptr) {
+        std::string basename = ent->d_name;
+        if (basename == "." || basename == "..") {
+            ent = global_fs.localfs->readdir(dirp);
+            continue;
+        }
+        auto fullpath = (DEFAULT_CHECKSUM_PATH + "/" + basename).c_str();
+        auto touch = global_fs.localfs->access(fullpath , F_OK);
+        LOG_DEBUG("check ` is valid: `", basename, touch == 0);
+        if (touch != 0) {
+            LOG_INFO("remove invalid symbol link: `", fullpath);
+            global_fs.localfs->unlink(fullpath);
+        }
+        ent = global_fs.localfs->readdir(dirp);
+    }
+    LOG_INFO("clean checksum done.");
+}
+
+bool ImageService::copy_checksum_file(const char* src, const char* dst_basename) {
+    std::string dst = DEFAULT_CHECKSUM_PATH + "/" + dst_basename;
+    auto touch = global_fs.localfs->access(dst.c_str(), F_OK);
+    if (touch == 0) {
+        LOG_INFO("checksum file ` already exists.", dst);
+        return true;
+    }
+    LOG_INFO("try to unlink old symbol link: `, ret: `",
+                    dst, global_fs.localfs->unlink(dst.c_str()));
+
+    if (global_fs.localfs->symlink(src, dst.c_str()) != 0) {
+        LOG_ERRNO_RETURN(0, -1, "create symbol link failed: ` -> `", src, dst.c_str());
+    }
+    return true;
+}
+
+
 ImageService *create_image_service() {
     ImageService *ret = new ImageService();
     if (ret->init() < 0) {
@@ -300,3 +357,4 @@ ImageService *create_image_service() {
     }
     return ret;
 }
+
