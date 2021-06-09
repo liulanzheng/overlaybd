@@ -38,7 +38,7 @@
 
 #define PARALLEL_LOAD_INDEX 32
 const std::string COMMIT_FILE_NAME = ".commit";
-const std::string CHECKSUM_FILE_NAME = ".checksum";
+const std::string CHECKSUM_FILE_NAME = ".checksum_file";
 
 
 FileSystem::IFile *ImageFile::__open_ro_file(const std::string &path) {
@@ -104,6 +104,8 @@ FileSystem::IFile *ImageFile::__open_ro_dir_share(const std::string &dir,
     if (access(checksum_file_path.c_str(), F_OK) == 0) {
         LOG_INFO("use checksum file: ` ", checksum_file_path);
         image_service.copy_checksum_file(checksum_file_path.c_str(), digest.c_str());
+    } else {
+        LOG_INFO("checksum file not found `", checksum_file_path);
     }
 
     std::string url;
@@ -343,13 +345,13 @@ LSMT::IFileRW *ImageFile::open_upper(ImageConfigNS::UpperConfig &upper) {
 
     int dafa_file_flags = O_RDWR;
 
-    data_file = new_sure_file_by_path(upper.data().c_str(), O_RDWR, this);
+    data_file = FileSystem::open_localfile_adaptor(upper.data().c_str(), O_RDWR, 0644, 0);
     if (!data_file) {
         LOG_ERROR("open(`,flags), `:`", upper.data(), errno, strerror(errno));
         goto ERROR_EXIT;
     }
 
-    idx_file = new_sure_file_by_path(upper.index().c_str(), O_RDWR, this);
+    idx_file = FileSystem::open_localfile_adaptor(upper.index().c_str(), O_RDWR, 0);
     if (!idx_file) {
         LOG_ERROR("open(`,flags), `:`", upper.index(), errno, strerror(errno));
         goto ERROR_EXIT;

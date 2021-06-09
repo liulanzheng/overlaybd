@@ -37,7 +37,7 @@
 #include <vector>
 
 const std::string DEFAULT_CONFIG_PATH = "/etc/overlaybd/overlaybd.json";
-const std::string DEFAULT_CHECKSUM_PATH = "/opt/overlaybd/checksum/";
+const std::string DEFAULT_CHECKSUM_PATH = "/opt/overlaybd/checksum";
 const int LOG_SIZE_MB = 10;
 const int LOG_NUM = 3;
 

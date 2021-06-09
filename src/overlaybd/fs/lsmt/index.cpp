@@ -470,26 +470,6 @@ public:
         return m_backing_index;
     }
 
-    virtual IMemoryIndex *load_range_index(int min_level, int max_level) const override {
-        if (min_level >= max_level) {
-            return nullptr;
-        }
-        LOG_DEBUG("` <= m.tag <= `", min_level, max_level - 1);
-        vector<SegmentMapping> range_index{};
-        auto index = m_backing_index->buffer();
-        for (auto m : ptr_array(index, m_backing_index->size())) {
-            if (((int)m.tag) >= min_level && ((int)m.tag) < max_level) {
-                range_index.push_back(m);
-            }
-        }
-        LOG_INFO("index size in range[`,`): `", min_level, max_level - 1, range_index.size());
-        if (!range_index.size()) {
-            LOG_DEBUG("return NULL");
-            return nullptr;
-        }
-        return new Index(std::move(range_index));
-    }
-
     virtual Index *rebuild_backing_index(Index *highlevel_idx, size_t max_level) {
         vector<SegmentMapping> mappings;
         const Index *indexes[2] = {highlevel_idx, const_cast<Index *>(m_backing_index)};
