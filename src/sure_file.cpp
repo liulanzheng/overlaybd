@@ -43,39 +43,8 @@ private:
             photon::thread_sleep(1); // 1sec
     }
 
-    void io_hand() {
-        while (m_ifile && m_ifile->m_status >= 0) {
-            LOG_ERROR("write(...) incorrect, io hang here!");
-            photon::thread_sleep(300);
-        }
-    }
 
 public:
-    virtual ssize_t write(const void *buf, size_t count) override {
-        size_t done_cnt = 0;
-        while (m_ifile && m_ifile->m_status >= 0 && done_cnt < count) {
-            ssize_t ret = m_file->write((char *)buf + done_cnt, count - done_cnt);
-            if (ret > 0)
-                done_cnt += ret;
-            if (done_cnt == count)
-                return count;
-            if (done_cnt > count) {
-                LOG_ERROR("write(...), done_cnt(`)>count(`), ret:`, errno:`, need io hang",
-                          done_cnt, count, ret, errno);
-                io_hand();
-            }
-
-            if (ret == -1 && errno == EINTR) {
-                LOG_INFO("write(...), errno:EINTR, need continue try.");
-                continue;
-            } else {
-                LOG_ERROR("write(...), done_cnt(`)>count(`), ret:`, errno:`, need io hang",
-                          done_cnt, count, ret, errno);
-                io_hand();
-            }
-        }
-        return done_cnt;
-    }
 
     virtual ssize_t pread(void *buf, size_t count, off_t offset) override {
         uint64_t try_cnt = 0;

@@ -52,27 +52,14 @@ public:
     }
 
     ~ImageFile() {
-        LOG_INFO("delete image file `", lowers_key);
-        if (lowers_key != "") {
-            auto it = image_service.opened_lowers.find(lowers_key);
-            if (it != image_service.opened_lowers.end()) {
-                int ref = --it->second->ref_count;
-                if (ref == 0) {
-                    LOG_INFO("delete lower_files `", it->second->key);
-                    delete it->second;
-                    image_service.opened_lowers.erase(it);
-                    __close_opened_files();
-                }
-            }
-        }
-
         if (upper_file != nullptr) {
             delete upper_file;
         }
+        if (lower_file != nullptr) {
+            delete lower_file;
+        }
 
         delete m_prefetcher;
-
-        image_service.clean_checksum();
     }
 
     int fstat(struct stat *buf) override {
@@ -125,19 +112,18 @@ private:
     ImageConfigNS::ImageConfig conf;
     ImageService &image_service;
     LSMT::IFileRW *upper_file = nullptr;
-    LSMT::IFileRO *lower_file = nullptr;
+    FileSystem::RefFile *lower_file = nullptr;
     std::string lowers_key;
-    std::vector<std::string> lower_file_keys;
 
     int init_image_file();
     void set_failed(std::string reason);
-    LSMT::IFileRO *open_lowers(std::vector<ImageConfigNS::LayerConfig> &,
-                               bool &);
+
+    FileSystem::RefFile *open_lowers(std::vector<ImageConfigNS::LayerConfig> &, bool &);
     LSMT::IFileRW *open_upper(ImageConfigNS::UpperConfig &);
+
     FileSystem::IFile *__open_ro_file(const std::string &);
     FileSystem::IFile *__open_ro_dir(const std::string &dir,
                                         const std::string &, const uint64_t, int);
-    FileSystem::IFile *__open_ro_dir_share(const std::string &dir,
+    FileSystem::RefFile *__open_ro_dir_share(const std::string &dir,
                                         const std::string &, const uint64_t);
-    void __close_opened_files();
 };

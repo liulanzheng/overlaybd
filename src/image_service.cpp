@@ -305,8 +305,7 @@ ImageFile *ImageService::create_image_file(const char *config_path) {
     set_result_file(resFile, data);
     return ret;
 }
-
-void ImageService::clean_checksum() {
+void ImageService::__do_clean_checksum() {
     auto dirp = global_fs.localfs->opendir(DEFAULT_CHECKSUM_PATH.c_str());
     if (dirp == nullptr) {
         LOG_ERROR("open checksumdir ` failed.", dirp);
@@ -320,23 +319,27 @@ void ImageService::clean_checksum() {
             ent = global_fs.localfs->readdir(dirp);
             continue;
         }
-        auto fullpath = (DEFAULT_CHECKSUM_PATH + "/" + basename).c_str();
-        auto touch = global_fs.localfs->access(fullpath , F_OK);
+        auto fullpath = DEFAULT_CHECKSUM_PATH + "/" + basename;
+        auto touch = global_fs.localfs->access(fullpath.c_str() , F_OK);
         LOG_DEBUG("check ` is valid: `", basename, touch == 0);
         if (touch != 0) {
             LOG_INFO("remove invalid symbol link: `", fullpath);
-            global_fs.localfs->unlink(fullpath);
+            global_fs.localfs->unlink(fullpath.c_str());
         }
         ent = global_fs.localfs->readdir(dirp);
     }
     LOG_INFO("clean checksum done.");
 }
 
+void ImageService::clean_checksum() {
+    photon::thread_create11(&ImageService::__do_clean_checksum, this);
+}
+
 bool ImageService::copy_checksum_file(const char* src, const char* dst_basename) {
     std::string dst = DEFAULT_CHECKSUM_PATH + "/" + dst_basename;
     auto touch = global_fs.localfs->access(dst.c_str(), F_OK);
     if (touch == 0) {
-        LOG_INFO("checksum file ` already exists.", dst);
+        LOG_DEBUG("checksum file ` already exists.", dst);
         return true;
     }
     LOG_INFO("try to unlink old symbol link: `, ret: `",
@@ -358,3 +361,21 @@ ImageService *create_image_service() {
     return ret;
 }
 
+namespace FileSystem {
+    RefFile* get_ref_file(const std::string &key) {
+        auto it = opened.find(key);
+        if (it != opened.end()) {
+            it->second->ref_count++;
+            LOG_INFO("return shared file `", key);
+            return new RefFile(it->second);
+        }
+        return nullptr;
+    }
+
+    RefFile* new_ref_file(IFile *file, const std::string &key) {
+        auto found = get_ref_file(key);
+        if (found != nullptr)
+            return found;
+        return new RefFile(new RefObj(file, key));
+    }
+}

@@ -174,7 +174,6 @@ public:
 
     virtual ~LSMTReadOnlyFile() {
         LOG_INFO("pread times: `, size: `M", lsmt_io_cnt, lsmt_io_size >> 20);
-        close();
         if (m_file_ownership) {
             LOG_DEBUG("m_file_ownership:`, m_files.size:`", m_file_ownership, m_files.size());
             delete m_index;
@@ -199,16 +198,6 @@ public:
 
     virtual IMemoryIndex0 *index() const override {
         return (IMemoryIndex0 *)m_index;
-    }
-
-    virtual int close() override {
-        safe_delete(m_index);
-        if (m_file_ownership) {
-            for (auto &x : m_files)
-                if (x)
-                    x->close();
-        }
-        return 0;
     }
 
     virtual int get_uuid(UUID &out, size_t layer_id) const override {
@@ -745,6 +734,7 @@ public:
     {
         off_t pos = m_files[m_rw_tag]->lseek(0, SEEK_END);
         m.moffset = (uint64_t)(pos / ALIGNMENT);
+        m.tag = m_rw_tag;
         LOG_DEBUG(m);
         static_cast<IMemoryIndex0*>(m_index)->insert(m);
         Lock lock(m_rw_mtx);
@@ -1228,7 +1218,7 @@ IFileRW *stack_files(IFileRW *upper_layer, IFileRO *lower_layers, bool ownership
     if (pht == nullptr) {
         LOG_ERRNO_RETURN(0, nullptr, "verify upper layer's Header failed.");
     }
-    auto idx = create_combo_index((IMemoryIndex0 *)u->m_index, l->m_index, l->m_files.size(), true);
+    auto idx = create_combo_index((IMemoryIndex0 *)u->m_index, l->m_index, l->m_files.size(), ownership);
     LSMTFile *rst = new LSMTFile;
     rst->m_index = idx;
     rst->m_findex = u->m_findex;
@@ -1250,8 +1240,6 @@ IFileRW *stack_files(IFileRW *upper_layer, IFileRO *lower_layers, bool ownership
     rst->m_files.push_back(u->m_files[0]);
     rst->m_uuid.push_back(u->m_uuid[0]);
     rst->m_rw_tag = rst->m_files.size() - 1;
-    u->m_index = l->m_index = nullptr;
-    l->m_file_ownership = u->m_file_ownership = false;
     if (ownership) {
         u->m_index = l->m_index = nullptr;
         l->m_file_ownership = u->m_file_ownership = false;

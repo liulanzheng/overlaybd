@@ -82,30 +82,24 @@ FileSystem::IFile *ImageFile::__open_ro_file(const std::string &path) {
     return switch_file;
 }
 
-FileSystem::IFile *ImageFile::__open_ro_dir_share(const std::string &dir,
+FileSystem::RefFile *ImageFile::__open_ro_dir_share(const std::string &dir,
                                 const std::string &digest, const uint64_t size) {
-    auto it = image_service.opened_files.find(dir);
-    if (it != image_service.opened_files.end()) {
-        it->second->ref_count++;
-        LOG_INFO("return shared file `", dir);
-        return it->second;
-    }
+    auto found = FileSystem::get_ref_file(dir);
+    if (found != nullptr)
+        return found;
 
     auto dl_file = dir + "/" + COMMIT_FILE_NAME;
     if (BKDL::check_downloaded(dl_file)) {
         auto file = __open_ro_file(dl_file);
-        auto rfile = new FileSystem::RefFile(file, dir);
-        LOG_INFO("add opened file for `", dir);
-        image_service.opened_files[dir] = rfile;
-        return rfile;
+        return FileSystem::new_ref_file(file, dir);
     }
 
     std::string checksum_file_path = dir + "/" + CHECKSUM_FILE_NAME;
     if (access(checksum_file_path.c_str(), F_OK) == 0) {
-        LOG_INFO("use checksum file: ` ", checksum_file_path);
+        LOG_DEBUG("use checksum file: ` ", checksum_file_path);
         image_service.copy_checksum_file(checksum_file_path.c_str(), digest.c_str());
     } else {
-        LOG_INFO("checksum file not found `", checksum_file_path);
+        LOG_WARN("checksum file not found `", checksum_file_path);
     }
 
     std::string url;
@@ -140,10 +134,7 @@ FileSystem::IFile *ImageFile::__open_ro_dir_share(const std::string &dir,
         delete remote_file;
         LOG_ERROR_RETURN(0, nullptr, "failed to open switch file `", url);
     }
-    auto rfile = new FileSystem::RefFile(switch_file, dir);
-    LOG_INFO("add opened file for `", dir);
-    image_service.opened_files[dir] = rfile;
-    return rfile;
+    return FileSystem::new_ref_file(switch_file, dir);
 }
 
 FileSystem::IFile *ImageFile::__open_ro_dir(const std::string &dir, const std::string &digest,
@@ -226,43 +217,36 @@ int ImageFile::open_lower_layer(FileSystem::IFile *&file, ImageConfigNS::LayerCo
     return -1;
 }
 
-LSMT::IFileRO *ImageFile::open_lowers(std::vector<ImageConfigNS::LayerConfig> &lowers,
+FileSystem::RefFile *ImageFile::open_lowers(std::vector<ImageConfigNS::LayerConfig> &lowers,
                                       bool &has_error) {
     LSMT::IFileRO *ret = nullptr;
+    FileSystem::RefFile *ref_ret = nullptr;
     has_error = false;
 
     if (lowers.size() == 0)
         return nullptr;
 
     lowers_key = "";
-    lower_file_keys.resize(lowers.size());
+
     for (int i = 0; i < lowers.size(); i++) {
         if (lowers[i].file() != "") {
-            lower_file_keys[i] = lowers[i].file();
             lowers_key += lowers[i].file() + ";";
         } else if (lowers[i].dir() != "") {
-            lower_file_keys[i] = lowers[i].dir();
             lowers_key += lowers[i].dir() + ";";
         } else {
             LOG_ERROR("layer index ` config failed, exit.", i);
             if (m_exception == "")
                 m_exception = "config error for layer " + std::to_string(i);
 
-            // rollback lowers_key and lower_file_keys
             has_error = true;
-            lower_file_keys.clear();
             lowers_key = "";
             return nullptr;
         }
     }
     // no concurrent for dev open, no need to lock
-    auto it = image_service.opened_lowers.find(lowers_key);
-    if (it != image_service.opened_lowers.end()) {
-        it->second->ref_count++;
-        LOG_INFO("return shared lowers `", lowers_key);
-        // return base type
-        return (LSMT::IFileRO*)(it->second->get_file());
-    }
+    auto found = FileSystem::get_ref_file(lowers_key);
+    if (found != nullptr)
+        return found;
 
     photon::join_handle *ths[PARALLEL_LOAD_INDEX];
     std::vector<FileSystem::IFile *> files;
@@ -283,7 +267,6 @@ LSMT::IFileRO *ImageFile::open_lowers(std::vector<ImageConfigNS::LayerConfig> &l
     for (int i = 0; i < files.size(); i++) {
         if (files[i] == nullptr) {
             has_error = true;
-            lower_file_keys[i] = ""; // rollback lowers_file_keys[i]
             LOG_ERROR("layer index ` open failed", i);
             if (m_exception == "")
                 m_exception = "failed to open layer " + std::to_string(i);
@@ -292,9 +275,9 @@ LSMT::IFileRO *ImageFile::open_lowers(std::vector<ImageConfigNS::LayerConfig> &l
     if (has_error)
         goto ERROR_EXIT;
 
-    ret = LSMT::open_files_ro((FileSystem::IFile **)&(files[0]), lowers.size(), false);
+    ret = LSMT::open_files_ro((FileSystem::IFile **)&(files[0]), lowers.size(), true);
     if (!ret) {
-        LOG_ERROR("LSMT::open_files_ro(files, `, `) return NULL", lowers.size(), false);
+        LOG_ERROR("LSMT::open_files_ro(files, `, `) return NULL", lowers.size(), true);
         goto ERROR_EXIT;
     }
 
@@ -302,38 +285,22 @@ LSMT::IFileRO *ImageFile::open_lowers(std::vector<ImageConfigNS::LayerConfig> &l
         m_prefetcher->replay();
     }
 
-    image_service.opened_lowers[lowers_key] = new FileSystem::RefFile(ret, lowers_key);
     LOG_INFO("LSMT::open_files_ro(files, `) success", lowers.size());
-    return ret;
+    return new_ref_file(ret, lowers_key);
 
 ERROR_EXIT:
     if (m_exception == "") {
         m_exception = "failed to create overlaybd device";
     }
 
-    __close_opened_files();
+    for (int i = 0; i < files.size(); i++) {
+        if (files[i] != nullptr)
+            delete files[i];
+    }
 
     lowers_key = "";
     has_error = true;
     return nullptr;
-}
-
-void ImageFile::__close_opened_files() {
-    for (int i = 0; i < lower_file_keys.size(); i++) {
-        std::string &key = lower_file_keys[i];
-        if (key == "") continue;
-        LOG_INFO("delete file for key `", key);
-        auto it = image_service.opened_files.find(key);
-        if (it == image_service.opened_files.end())
-            continue;
-        int ref = --it->second->ref_count;
-        LOG_INFO("delete file ref `", ref);
-        if (ref == 0) {
-            LOG_INFO("delete file `", it->second->key);
-            delete it->second;
-            image_service.opened_files.erase(it);
-        }
-    }
 }
 
 LSMT::IFileRW *ImageFile::open_upper(ImageConfigNS::UpperConfig &upper) {
@@ -425,7 +392,7 @@ int ImageFile::init_image_file() {
         LOG_ERROR("open upper layer failed.");
         goto ERROR_EXIT;
     }
-    stack_ret = LSMT::stack_files(upper_file, lower_file, false, false);
+    stack_ret = LSMT::stack_files(upper_file, (LSMT::IFileRO*)lower_file->get_file(), false, false);
     if (!stack_ret) {
         LOG_ERROR("LSMT::stack_files(`, `)", (uint64_t)upper_file, true);
         goto ERROR_EXIT;
