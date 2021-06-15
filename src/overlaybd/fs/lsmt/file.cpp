@@ -174,9 +174,9 @@ public:
 
     virtual ~LSMTReadOnlyFile() {
         LOG_INFO("pread times: `, size: `M", lsmt_io_cnt, lsmt_io_size >> 20);
+        delete m_index;
         if (m_file_ownership) {
             LOG_DEBUG("m_file_ownership:`, m_files.size:`", m_file_ownership, m_files.size());
-            delete m_index;
             for (auto &x : m_files)
                 safe_delete(x);
         }
@@ -577,7 +577,7 @@ public:
     }
 
     ~LSMTFile() {
-        LOG_DEBUG(" ~LSMTFile()");
+        LOG_INFO(" ~LSMTFile()");
         close();
     }
 
@@ -604,7 +604,7 @@ public:
     }
 
     virtual int close() override {
-        LOG_DEBUG("ownership:`, m_findex:`", m_file_ownership, m_findex);
+        LOG_INFO("ownership:`, m_findex:`", m_file_ownership, m_findex);
         {
             Lock lock(m_rw_mtx);
             do_group_commit_mappings();

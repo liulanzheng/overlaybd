@@ -401,11 +401,8 @@ public:
         mapping = index0->mapping;
         m_ownership = ownership;
 
-        // TODO set tag value
         for (auto &x : mapping)
             ((SegmentMapping &)x).tag = ro_layers_count;
-        // for (auto &x : *m_backing_index)
-        //     ((SegmentMapping &)x).tag++;
     }
     ~ComboIndex() {
         if (m_ownership) {

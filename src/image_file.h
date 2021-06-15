@@ -37,10 +37,10 @@
 #include "overlaybd/fs/lsmt/file.h"
 #include "overlaybd/photon/thread11.h"
 
-class ImageFile : public FileSystem::ForwardFile {
+class ImageFile : public FileSystem::ForwardFile_Ownership {
 public:
     ImageFile(ImageConfigNS::ImageConfig &_conf, ImageService &is)
-        : ForwardFile(nullptr), image_service(is) {
+        : ForwardFile_Ownership(nullptr, true), image_service(is) {
         conf.CopyFrom(_conf, conf.GetAllocator());
         m_exception = "";
         m_status = init_image_file();
