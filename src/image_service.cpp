@@ -26,6 +26,9 @@
 #include "overlaybd/fs/checkedfs/checkedfs.h"
 #include "overlaybd/fs/tar_file.h"
 #include "overlaybd/fs/zfile/zfile.h"
+#include "overlaybd/fs/p2pfs/root_selector.h"
+#include "overlaybd/fs/p2pfs/p2pfs.h"
+#include "overlaybd/net/socket.h"
 #include "overlaybd/photon/thread.h"
 #include <dirent.h>
 #include <errno.h>
@@ -226,6 +229,19 @@ int ImageService::init() {
         return -1;
     if (create_dir(DEFAULT_CHECKSUM_PATH.c_str()) == false)
         return -1;
+
+    if (global_fs.p2p_fs == nullptr && global_conf.p2p().enable()) {
+        //TODO
+        // auto rs = FileSystem::new_single_root_selector(
+        //     FileSystem::NodeID(Net::EndPoint{Net::IPAddr(global_conf.p2p().ip()), global_conf.p2p().port()}));
+        // if (rs == nullptr) {
+        //     LOG_ERROR_RETURN(0, -1,
+        //         "new_single_root_selector failed. ip: `, port: `",
+        //         global_conf.p2p().ip(), global_conf.p2p().port());
+        // }
+        // global_fs.p2p_fs = FileSystem::new_p2pfs(rs, FileSystem::NodeID(), nullptr, nullptr, false, 200, 3,
+        //         nullptr, 1000UL * 1000, 1000000UL * global_conf.p2p().timeout());
+    }
 
     if (global_fs.remote_fs == nullptr) {
         auto cafile = "/etc/ssl/certs/ca-bundle.crt";

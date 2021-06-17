@@ -7,6 +7,7 @@ add_subdirectory(lsmt)
 add_subdirectory(zfile)
 add_subdirectory(cache)
 add_subdirectory(checkedfs)
+add_subdirectory(p2pfs)
 
 target_link_libraries(fs_lib
     registryfs_lib

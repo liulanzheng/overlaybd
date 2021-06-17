@@ -74,6 +74,7 @@ typedef enum {
 
 struct GlobalFs {
     FileSystem::IFileSystem *remote_fs = nullptr;
+    FileSystem::IFileSystem *p2p_fs = nullptr;
     FileSystem::IFileSystem *cachefs = nullptr;
     FileSystem::IFileSystem *srcfs = nullptr;
     FileSystem::IFileSystem *localfs = nullptr;

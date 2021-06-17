@@ -11,5 +11,11 @@
         "maxMBps": 100
     },
     "enableAudit": true,
-    "auditPath": "/var/log/overlaybd-audit.log"
+    "auditPath": "/var/log/overlaybd-audit.log",
+    "p2p": {
+        "enable": true,
+        "ip": "127.0.0.1",
+        "port": 9877,
+        "timeout": 10
+    }
 }

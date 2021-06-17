@@ -95,6 +95,7 @@ target_link_libraries(overlaybd-tcmu
     photon_lib
     net_lib
     tcmu_lib
+    rpc_lib
     ${CURL_LIBRARIES}
     ${OPENSSL_SSL_LIBRARY}
     ${OPENSSL_CRYPTO_LIBRARY}

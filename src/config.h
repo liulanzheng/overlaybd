@@ -59,6 +59,14 @@ struct ImageConfig : public ConfigUtils::Config {
     APPCFG_PARA(accelerationLayer, bool, false);
     APPCFG_PARA(recordTracePath, std::string, "");
 };
+struct P2PConfig : public ConfigUtils::Config {
+    APPCFG_CLASS;
+
+    APPCFG_PARA(enable, bool, false);
+    APPCFG_PARA(ip, std::string, "127.0.0.1");
+    APPCFG_PARA(port, int, 9877);
+    APPCFG_PARA(timeout, int, 10);
+};
 
 struct GlobalConfig : public ConfigUtils::Config {
     APPCFG_CLASS
@@ -72,6 +80,7 @@ struct GlobalConfig : public ConfigUtils::Config {
     APPCFG_PARA(download, DownloadConfig);
     APPCFG_PARA(enableAudit, bool, true);
     APPCFG_PARA(auditPath, std::string, "/var/log/overlaybd-audit.log");
+    APPCFG_PARA(p2p, P2PConfig);
 };
 
 struct AuthConfig : public ConfigUtils::Config {

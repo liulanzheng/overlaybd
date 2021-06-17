@@ -4,6 +4,7 @@ target_compile_definitions(base_lib PUBLIC "-DLOGCURRENT")
 
 add_subdirectory(fs)
 add_subdirectory(net)
+add_subdirectory(rpc)
 add_subdirectory(photon)
 
 if(BUILD_TESTING)
