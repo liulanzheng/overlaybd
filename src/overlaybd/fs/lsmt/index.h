@@ -114,6 +114,7 @@ public:
 
     // number of 512B blocks allocated
     virtual uint64_t block_count() const = 0;
+    virtual const IMemoryIndex *front_index() const = 0;
 };
 
 // the level 0 memory index, which supports write
@@ -126,6 +127,7 @@ public:
     // memory allocation is aligned to the `alignment`
     virtual SegmentMapping *dump(size_t alignment = 0) const = 0;
     virtual IMemoryIndex *make_read_only_index() const = 0;
+    virtual bool predict_insert(const Segment &s, size_t disk_quota) const = 0;
 };
 
 class IComboIndex : public IMemoryIndex0 {
@@ -133,7 +135,6 @@ public:
     // backing index must NOT be IMemoryIndex0!
     virtual int backing_index(const IMemoryIndex *bi) = 0;
     virtual const IMemoryIndex *backing_index() const = 0;
-    virtual const IMemoryIndex0 *front_index() const = 0;
 };
 
 // create writable level 0 memory index from an array of mappings;
@@ -163,7 +164,7 @@ extern "C" IMemoryIndex *merge_memory_indexes(const IMemoryIndex **pindexes, std
 // were one single index; inserting into a combo effectively inserting into the index0 part;
 // the mapped offset must be within [moffset_begin, moffset_end)
 extern "C" IComboIndex *create_combo_index(IMemoryIndex0 *index0, const IMemoryIndex *index,
-                                           uint8_t ro_index_count, bool ownership);
+                                           int ro_index_count, bool ownership);
 
 // compress raw index array by mergeing adjacent continuous mappings
 // returning compressed size of the array

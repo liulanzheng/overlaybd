@@ -146,6 +146,10 @@ public:
             m.tag += delta;
         return 0;
     }
+
+    virtual const IMemoryIndex *front_index() const override {
+        return (const IMemoryIndex *)this;
+    }
 };
 
 class LevelIndex : public Index {
@@ -376,13 +380,35 @@ public:
         return mapping.end();
     }
 
+    virtual const IMemoryIndex *front_index() const override {
+        return this;
+    }
+
+    bool predict_insert(const Segment &s, size_t disk_quota) const {
+        auto disk_usage = this->block_count(); // * ALIGNMENT;
+        if (disk_usage + s.length < disk_quota) {
+            return true;
+        }
+        auto *idx = (IMemoryIndex *)(this->front_index());
+        size_t nwrites = 0;
+        foreach_segments(
+            idx, s,
+            [&](const Segment &m) __attribute__((always_inline)) {
+                nwrites += (!((SegmentMapping *)&m)->zeroed) * m.length;
+                return 0;
+            },
+            [&](const SegmentMapping &m) __attribute__((always_inline)) { return 0; });
+        if ((nwrites > 0) && (disk_usage + nwrites > disk_quota)) {
+            LOG_ERRNO_RETURN(ENOSPC, false, "disk usage is full. `+`>`",
+                             (uint64_t)(this->block_count()), nwrites, disk_quota);
+        }
+        LOG_DEBUG("expect write: `", nwrites);
+        return true;
+    }
     UNIMPLEMENTED(int backing_index(const IMemoryIndex *bi) override);
     UNIMPLEMENTED(int increase_tag(int) override);
 
     UNIMPLEMENTED_POINTER(const IMemoryIndex *backing_index() const override);
-    virtual const IMemoryIndex0 *front_index() const override {
-        return this;
-    }
 };
 
 static void merge_indexes(uint8_t level, vector<SegmentMapping> &mapping, const Index **pindexes,
@@ -411,8 +437,8 @@ public:
         }
     }
 
-    virtual const IMemoryIndex0 *front_index() const override {
-        return this->m_index0;
+    virtual const IMemoryIndex *front_index() const override {
+        return (const IMemoryIndex *)m_index0;
     }
 
     virtual size_t lookup(Segment s, /* OUT */ SegmentMapping *pm, size_t n) const override {
@@ -581,7 +607,7 @@ static void merge_indexes(uint8_t level, vector<SegmentMapping> &mapping, const 
     }
 }
 
-IComboIndex *create_combo_index(IMemoryIndex0 *index0, const IMemoryIndex *index, uint8_t ro_index_count, bool ownership) {
+IComboIndex *create_combo_index(IMemoryIndex0 *index0, const IMemoryIndex *index, int ro_index_count, bool ownership) {
     if (!index0 || !index)
         LOG_ERROR_RETURN(EINVAL, nullptr, "invalid argument(s)");
 

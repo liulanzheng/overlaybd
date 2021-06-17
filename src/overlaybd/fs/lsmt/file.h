@@ -85,6 +85,7 @@ public:
         uint64_t valid_data_size = -1; // size of valid data (excluding garbage)
     };
     virtual DataStat data_stat() const = 0;
+    virtual int set_quota(uint64_t disk_quota) = 0;
 };
 
 // create a new writable LSMT file constitued by a data file and an index file,
@@ -97,7 +98,8 @@ struct LayerInfo {
     UUID parent_uuid;
     UUID uuid;
     char *user_tag = nullptr; // a user provided string of message, 256B at most
-    size_t len = 0;           // len of user_tag; if it's 0, it will be detected with strlen()
+    bool sparse_rw = false;
+    size_t len = 0; // len of user_tag; if it's 0, it will be detected with strlen()
     LayerInfo(IFile *_fdata = nullptr, IFile *_findex = nullptr) : fdata(_fdata), findex(_findex) {
         parent_uuid.clear();
         uuid.generate();
