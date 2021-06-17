@@ -174,6 +174,8 @@ bool download_blob(FileSystem::IFile *source_file, std::string &digest, std::str
     while (downloading) {
         photon::thread_sleep(1);
     }
+    if (!running)
+        return false;
 
     downloading = true;
     DEFER(downloading = false;);
@@ -198,7 +200,7 @@ bool download_blob(FileSystem::IFile *source_file, std::string &digest, std::str
     }
     DEFER(delete dst;);
 
-    while (max_try-- > 0) {
+    while (max_try-- > 0 && running) {
         auto res = filecopy(src, dst, 1024UL * 1024, 1, running);
         if (res < 0) {
             LOG_WARN("retry download for file `", dst_file);
