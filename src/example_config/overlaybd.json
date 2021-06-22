@@ -17,5 +17,6 @@
         "ip": "127.0.0.1",
         "port": 9877,
         "timeout": 10
-    }
+    },
+    "checksumPath": "/var/lib/dadi/checksum"
 }

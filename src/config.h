@@ -81,6 +81,7 @@ struct GlobalConfig : public ConfigUtils::Config {
     APPCFG_PARA(enableAudit, bool, true);
     APPCFG_PARA(auditPath, std::string, "/var/log/overlaybd-audit.log");
     APPCFG_PARA(p2p, P2PConfig);
+    APPCFG_PARA(checksumPath, std::string, "/var/lib/dadi/checksum");
 };
 
 struct AuthConfig : public ConfigUtils::Config {

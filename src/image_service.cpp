@@ -41,7 +41,6 @@
 #include <vector>
 
 const std::string DEFAULT_CONFIG_PATH = "/etc/overlaybd/overlaybd.json";
-const std::string DEFAULT_CHECKSUM_PATH = "/var/lib/dadi/checksum";
 const int LOG_SIZE_MB = 10;
 const int LOG_NUM = 3;
 
@@ -242,7 +241,7 @@ int ImageService::init() {
 
     if (create_dir(global_conf.registryCacheDir().c_str()) == false)
         return -1;
-    if (create_dir(DEFAULT_CHECKSUM_PATH.c_str()) == false)
+    if (create_dir(global_conf.checksumPath().c_str()) == false)
         return -1;
 
     if (global_fs.remote_fs == nullptr) {
@@ -261,8 +260,8 @@ int ImageService::init() {
             LOG_ERROR_RETURN(0, -1, "create registryfs failed.");
         }
 
-        auto metafs = FileSystem::new_localfs_adaptor(DEFAULT_CHECKSUM_PATH.c_str());
-        LOG_INFO("create checkedfs, checksum path: `", DEFAULT_CHECKSUM_PATH);
+        auto metafs = FileSystem::new_localfs_adaptor(global_conf.checksumPath().c_str());
+        LOG_INFO("create checkedfs, checksum path: `", global_conf.checksumPath());
         auto checkedfs = FileSystem::new_checkedfs_adaptor_v1(registry_fs, metafs, meta_name_trans);
 
         auto registry_cache_fs = FileSystem::new_localfs_adaptor(
@@ -301,10 +300,10 @@ int ImageService::init() {
                 (uint16_t)global_conf.p2p().port()
             }), FileSystem::NodeID(), nullptr, nullptr, false, 200, 0,
                 nullptr, 1000UL * 1000, 1000000UL * global_conf.p2p().timeout());
-        auto metafs = FileSystem::new_localfs_adaptor(DEFAULT_CHECKSUM_PATH.c_str());
-        LOG_INFO("create checkedfs, checksum path: `", DEFAULT_CHECKSUM_PATH);
+        auto metafs = FileSystem::new_localfs_adaptor(global_conf.checksumPath().c_str());
+        LOG_INFO("create checkedfs, checksum path: `", global_conf.checksumPath());
         // auto checkedfs = FileSystem::new_checkedfs_adaptor_v1(p2pfs, metafs, meta_name_trans_v2);
-        global_fs.p2pfs = new FileSystem::P2pAdaptorFS(p2pfs, global_fs.srcfs);
+        global_fs.p2pfs = new FileSystem::P2pAdaptorFS(p2pfs, global_fs.srcfs, global_fs.remote_fs);
         LOG_INFO("p2p fs created");
     }
 
@@ -340,7 +339,7 @@ ImageFile *ImageService::create_image_file(const char *config_path) {
     return ret;
 }
 void ImageService::__do_clean_checksum() {
-    auto dirp = global_fs.localfs->opendir(DEFAULT_CHECKSUM_PATH.c_str());
+    auto dirp = global_fs.localfs->opendir(global_conf.checksumPath().c_str());
     if (dirp == nullptr) {
         LOG_ERROR("open checksumdir ` failed.", dirp);
         return;
@@ -353,7 +352,7 @@ void ImageService::__do_clean_checksum() {
             ent = global_fs.localfs->readdir(dirp);
             continue;
         }
-        auto fullpath = DEFAULT_CHECKSUM_PATH + "/" + basename;
+        auto fullpath = global_conf.checksumPath() + "/" + basename;
         auto touch = global_fs.localfs->access(fullpath.c_str() , F_OK);
         LOG_DEBUG("check ` is valid: `", basename, touch == 0);
         if (touch != 0) {
@@ -370,7 +369,7 @@ void ImageService::clean_checksum() {
 }
 
 bool ImageService::copy_checksum_file(const char* src, const char* dst_basename) {
-    std::string dst = DEFAULT_CHECKSUM_PATH + "/" + dst_basename;
+    std::string dst = global_conf.checksumPath() + "/" + dst_basename;
     auto touch = global_fs.localfs->access(dst.c_str(), F_OK);
     if (touch == 0) {
         LOG_DEBUG("checksum file ` already exists.", dst);

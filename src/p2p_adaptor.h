@@ -26,12 +26,14 @@ namespace FileSystem {
 class P2pAdaptorFile : public ForwardFile {
 public:
     IFileSystem *m_underlayfs = nullptr;
+    IFileSystem *m_backupfs = nullptr;
     IFile *m_rfile = nullptr;
     std::string m_pathname;
 
-    P2pAdaptorFile(IFileSystem *underlayfs, IFile *rfile, const char *pathname)
-        : ForwardFile(nullptr), m_underlayfs(underlayfs), m_rfile(rfile), m_pathname(pathname) {
-    };
+    P2pAdaptorFile(IFileSystem *underlayfs, IFile *rfile, const char *pathname,
+                   IFileSystem *backupfs)
+        : ForwardFile(nullptr), m_underlayfs(underlayfs), m_rfile(rfile), m_pathname(pathname),
+          m_backupfs(backupfs){};
 
     virtual ~P2pAdaptorFile() {
         safe_delete(m_rfile);
@@ -43,8 +45,10 @@ public:
 
 class P2pAdaptorFS : public ForwardFS {
 public:
-    IFileSystem *m_rfs = nullptr;
-    P2pAdaptorFS(IFileSystem *fs, IFileSystem *rfs) : ForwardFS(fs), m_rfs(rfs) {
+    IFileSystem *m_dfs = nullptr; // down grade backup fs
+    IFileSystem *m_rfs = nullptr; // registry fs
+    P2pAdaptorFS(IFileSystem *fs, IFileSystem *rfs, IFileSystem *dfs)
+        : ForwardFS(fs), m_rfs(rfs), m_dfs(dfs) {
     }
 
     virtual ~P2pAdaptorFS() {
@@ -56,7 +60,7 @@ public:
         if (file == nullptr) {
             LOG_ERRNO_RETURN(0, nullptr, "open remote file failed: `", pathname);
         }
-        auto ret = new P2pAdaptorFile(m_fs, file, pathname);
+        auto ret = new P2pAdaptorFile(m_fs, file, pathname, m_dfs);
         auto auth_ret = ret->reauth();
         if (auth_ret < 0) {
             delete ret;
