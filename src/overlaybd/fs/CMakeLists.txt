@@ -15,6 +15,8 @@ target_link_libraries(fs_lib
     zfile_lib
     cache_lib
     checkedfs_lib
+    p2pfs_lib
+    rpc_lib
 )
 
 if(BUILD_TESTING)

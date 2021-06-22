@@ -70,7 +70,15 @@ find_package(CURL REQUIRED)
 set(OpenSSL_STATIC ON)
 find_package(OpenSSL REQUIRED)
 
-file(GLOB SOURCE_IMAGE image_file.cpp image_service.cpp sure_file.cpp switch_file.cpp bk_download.cpp prefetch.cpp)
+file(GLOB SOURCE_IMAGE
+  image_file.cpp
+  image_service.cpp
+  sure_file.cpp
+  switch_file.cpp
+  bk_download.cpp
+  prefetch.cpp
+  p2p_adaptor.cpp
+)
 
 add_library(image_lib STATIC
     ${SOURCE_IMAGE}
@@ -94,8 +102,8 @@ target_link_libraries(overlaybd-tcmu
     fs_lib
     photon_lib
     net_lib
-    tcmu_lib
     rpc_lib
+    tcmu_lib
     ${CURL_LIBRARIES}
     ${OPENSSL_SSL_LIBRARY}
     ${OPENSSL_CRYPTO_LIBRARY}

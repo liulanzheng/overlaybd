@@ -1,13 +1,11 @@
 #pragma once
 #include "../filesystem.h"
 #include "client.h"
-#include "root_selector.h"
 
 namespace FileSystem
 {
-
     IFileSystem* new_p2pfs(
-        RootSelector* root_selector,
+        const NodeID &root = NodeID(), //root的ID
         const NodeID &myid = NodeID(), //自身Client的ID
         IFileSystem* metafs = nullptr, //用于校验层。如果不需要校验则为nullptr
         ConnectionTracer* tracer = nullptr,

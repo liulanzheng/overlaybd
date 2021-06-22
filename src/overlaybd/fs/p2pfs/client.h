@@ -85,8 +85,6 @@ public:
 
     virtual int get_queue_count(Net::EndPoint ep) = 0;
 
-    virtual void set_root_selector(RootSelector* rs) = 0;
-
     virtual int rename(const char* oldname, const char* newname) = 0;
 
     virtual int rename(Net::EndPoint& node, const char* oldname, const char* newname) = 0;
@@ -101,7 +99,7 @@ public:
 IFile* new_p2p_client_file(const char* filename, P2PClient* client);
 
 
-P2PClient* new_p2pclient(const NodeID& id, RootSelector* root,
+P2PClient* new_p2pclient(const NodeID& id, const NodeID& root,
                         int ttl = 200,
                          int retry_time = 5, const char* domain = nullptr,
                          uint64_t connect_timeout = 1000UL * 1000,

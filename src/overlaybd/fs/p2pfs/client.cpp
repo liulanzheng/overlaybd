@@ -28,7 +28,6 @@
 #include "../range-split.h"
 #include "../virtual-file.h"
 #include "protocol.h"
-#include "root_selector.h"
 
 using namespace std;
 using namespace Net;
@@ -88,7 +87,7 @@ protected:
 
 class P2PClientImpl : public P2PClient {
 public:
-    P2PClientImpl(const NodeID& myid, RootSelector* root,
+    P2PClientImpl(const NodeID& myid, const NodeID& root,
                   uint64_t expire_timeout = 10UL * 1000 * 1000,
                   uint64_t expire_timer = 5UL * 1000 * 1000,
                   int ttl = 200,
@@ -143,13 +142,9 @@ public:
     again:
         if (--retry < 0) {
             ERRNO err;
-            LOG_ERROR_RETURN(0, -err.no, "Retry too many times");
+            return -err.no;
+            // LOG_ERROR_RETURN(0, -err.no, "Retry too many times");
         }
-        std::vector<NodeID> blacklist;
-        for (const auto& x : m_blacklist) {
-            blacklist.emplace_back(x);
-        }
-        req.blacklist.assign(blacklist);
         auto ret = rpc_call<P2PReadV>(*ep, req, resp);
         if (ret < 0) return ret;
         if (resp.ret < 0) {
@@ -341,20 +336,17 @@ public:
             });
     }
 
-    virtual int evictKeys(const char* prefix) override {
-        auto nodes = m_root->get_root_list();
-        std::string sprefix(prefix);
-        for (auto& node : nodes) {
-            P2PEvictKeys::Request req;
-            P2PEvictKeys::Response resp;
-            req.prefix.assign(sprefix);
-            int ret = rpc_call<P2PEvictKeys>(node.endpoint(), req, resp);
-            if (ret < 0) {
-                LOG_ERROR("evict failed, ret:`,error:`,node:`", ret, ERRNO(),
-                          node.endpoint());
-            }
-            photon::thread_usleep(100ul * 1000);
+    virtual int evictKeys(const char* prefix) override {std::string sprefix(prefix);
+        P2PEvictKeys::Request req;
+        P2PEvictKeys::Response resp;
+        req.prefix.assign(sprefix);
+        int ret = rpc_call<P2PEvictKeys>(m_root.endpoint(), req, resp);
+        if (ret < 0) {
+            LOG_ERROR("evict failed, ret:`,error:`,node:`", ret, ERRNO(),
+                        m_root.endpoint());
         }
+        photon::thread_usleep(100ul * 1000);
+
         return 0;
     }
 
@@ -493,8 +485,6 @@ public:
         return 0;
     }
 
-    virtual void set_root_selector(RootSelector* rs) override { m_root = rs; }
-
     virtual int rename(Net::EndPoint& ep, const char* oldname, const char* newname) override {
         P2PRename::Request req;
         P2PRename::Response resp;
@@ -543,7 +533,7 @@ public:
 
 protected:
     NodeID m_myid;
-    RootSelector* m_root;
+    NodeID m_root;
     ConnectionTracer* m_tracer = nullptr;
     int m_ttl;
     ExpireList<Net::EndPoint> m_blacklist;
@@ -563,10 +553,10 @@ protected:
     again:
         if (--retry < 0) {
             ERRNO err;
-            LOG_ERROR_RETURN(0, -err.no, "Too many retry, last error is ", err);
+            return err.no;
+            // LOG_ERROR_RETURN(0, -err.no, "Too many retry, last error is ", err);
         }
-        auto id = m_myid;
-        auto node = id.endpoint();
+        auto node = m_root.endpoint();
         // LOG_DEBUG("Call to ", node);
         auto ret = call(&node, false);
         if (ret < 0) {
@@ -582,7 +572,7 @@ protected:
                 errno = err.no;
                 goto again;
             } else if (err.no == EBUSY) {
-                if (busy(id.endpoint(), node, isroot)) {
+                if (busy(node, node, isroot)) {
                     // redirect, consider it is not retry
                     retry++;
                     errno = err.no;
@@ -605,8 +595,7 @@ protected:
                  typename T::Response& resp) {
         int ret = -1;
         bool immediately = false;
-        bool tls = m_root_ssl && m_root->is_root(NodeID(ep));
-        WITH_Release(auto stub = m_pool->get_stub(ep, tls),
+        WITH_Release(auto stub = m_pool->get_stub(ep, false),
                      m_pool->put_stub(ep, immediately)) {
             ret = stub->call<T>(req, resp, m_pool->get_timeout());
             if (ret < 0) {
@@ -700,7 +689,7 @@ IFile* new_p2p_client_file(const char* filename, P2PClient* client) {
 }
 
 
-P2PClient* new_p2pclient(const NodeID& id, RootSelector* root,
+P2PClient* new_p2pclient(const NodeID& id, const NodeID& root,
                          int ttl, int retry_time,
                          const char* domain, uint64_t connect_timeout,
                          uint64_t rpc_timeout, IFileSystem* checkedfs,

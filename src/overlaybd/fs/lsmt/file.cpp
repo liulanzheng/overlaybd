@@ -264,7 +264,7 @@ public:
                 }
                 assert(m.tag < m_files.size());
                 ssize_t size = m.length * ALIGNMENT;
-                LOG_DEBUG("offset: `, length: `", m.moffset, size);
+                LOG_DEBUG("lsmt pread segment, tag:` offset: `, length: `", m.tag, m.moffset, size);
                 ssize_t ret = m_files[m.tag]->pread(buf, size, m.moffset * ALIGNMENT);
                 if (ret < size) {
                     LOG_ERRNO_RETURN(0, (int)ret,
@@ -866,7 +866,7 @@ public:
     }
 
     virtual ssize_t pwrite(const void *buf, size_t count, off_t offset) override {
-        LOG_DEBUG("{offset:`,length:`}", offset, count);
+        LOG_DEBUG("pwrite {offset:`,length:`}", offset, count);
         CHECK_ALIGNMENT(count, offset);
 
         while (count > MAX_IO_SIZE) {
@@ -883,6 +883,7 @@ public:
             (uint32_t)count / (uint32_t)ALIGNMENT,
             (uint64_t)moffset / (uint64_t)ALIGNMENT,
         };
+        m.tag = m_rw_tag;
         if (((IMemoryIndex0 *)m_index)->predict_insert(m, m_disk_quota / ALIGNMENT) == false) {
             return -1;
         }

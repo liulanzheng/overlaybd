@@ -26,10 +26,11 @@
 #include "overlaybd/fs/checkedfs/checkedfs.h"
 #include "overlaybd/fs/tar_file.h"
 #include "overlaybd/fs/zfile/zfile.h"
-#include "overlaybd/fs/p2pfs/root_selector.h"
 #include "overlaybd/fs/p2pfs/p2pfs.h"
 #include "overlaybd/net/socket.h"
+#include "overlaybd/net/socket.h"
 #include "overlaybd/photon/thread.h"
+#include "p2p_adaptor.h"
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -40,7 +41,7 @@
 #include <vector>
 
 const std::string DEFAULT_CONFIG_PATH = "/etc/overlaybd/overlaybd.json";
-const std::string DEFAULT_CHECKSUM_PATH = "/opt/overlaybd/checksum";
+const std::string DEFAULT_CHECKSUM_PATH = "/var/lib/dadi/checksum";
 const int LOG_SIZE_MB = 10;
 const int LOG_NUM = 3;
 
@@ -216,6 +217,20 @@ static std::string meta_name_trans(const char *fn) {
     return ret.substr(p);
 }
 
+static std::string meta_name_trans_v2(const char *fn) {
+    std::string ret(fn);
+    std::string head_kw = "/sha256";
+    std::string tail_kw = "/data?";
+    auto p = ret.find(head_kw);
+    auto q = ret.find(tail_kw);
+    if (p == std::string::npos || q == std::string::npos) {
+        return ret;
+    }
+    p += 11; // /sha256/xx/
+    LOG_DEBUG("` -> sha256:`", fn, ret.substr(p, q - p));
+    return "sha256:" + ret.substr(p, q - p);
+}
+
 int ImageService::init() {
     if (read_global_config_and_set() < 0) {
         return -1;
@@ -229,19 +244,6 @@ int ImageService::init() {
         return -1;
     if (create_dir(DEFAULT_CHECKSUM_PATH.c_str()) == false)
         return -1;
-
-    if (global_fs.p2p_fs == nullptr && global_conf.p2p().enable()) {
-        //TODO
-        // auto rs = FileSystem::new_single_root_selector(
-        //     FileSystem::NodeID(Net::EndPoint{Net::IPAddr(global_conf.p2p().ip()), global_conf.p2p().port()}));
-        // if (rs == nullptr) {
-        //     LOG_ERROR_RETURN(0, -1,
-        //         "new_single_root_selector failed. ip: `, port: `",
-        //         global_conf.p2p().ip(), global_conf.p2p().port());
-        // }
-        // global_fs.p2p_fs = FileSystem::new_p2pfs(rs, FileSystem::NodeID(), nullptr, nullptr, false, 200, 3,
-        //         nullptr, 1000UL * 1000, 1000000UL * global_conf.p2p().timeout());
-    }
 
     if (global_fs.remote_fs == nullptr) {
         auto cafile = "/etc/ssl/certs/ca-bundle.crt";
@@ -290,6 +292,22 @@ int ImageService::init() {
         global_fs.cachefs = registry_cache_fs;
         global_fs.srcfs = registry_fs;
     }
+
+
+    if (global_fs.p2pfs == nullptr && global_conf.p2p().enable()) {
+        LOG_INFO("p2p agent: `:`", global_conf.p2p().ip(), global_conf.p2p().port());
+        auto p2pfs = FileSystem::new_p2pfs(FileSystem::NodeID(Net::EndPoint{
+                Net::IPAddr(global_conf.p2p().ip().c_str()),
+                (uint16_t)global_conf.p2p().port()
+            }), FileSystem::NodeID(), nullptr, nullptr, false, 200, 0,
+                nullptr, 1000UL * 1000, 1000000UL * global_conf.p2p().timeout());
+        auto metafs = FileSystem::new_localfs_adaptor(DEFAULT_CHECKSUM_PATH.c_str());
+        LOG_INFO("create checkedfs, checksum path: `", DEFAULT_CHECKSUM_PATH);
+        // auto checkedfs = FileSystem::new_checkedfs_adaptor_v1(p2pfs, metafs, meta_name_trans_v2);
+        global_fs.p2pfs = new FileSystem::P2pAdaptorFS(p2pfs, global_fs.srcfs);
+        LOG_INFO("p2p fs created");
+    }
+
     return 0;
 }
 

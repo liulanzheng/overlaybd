@@ -111,10 +111,19 @@ FileSystem::RefFile *ImageFile::__open_ro_dir_share(const std::string &dir,
     if (url[url.length() - 1] != '/')
         url += "/";
     url += digest;
-    LOG_DEBUG("open file from remotefs: `, size: `", url, size);
-    FileSystem::IFile *remote_file = image_service.global_fs.remote_fs->open(url.c_str(), O_RDONLY);
+    LOG_INFO("open file from remotefs: `, size: `", url, size);
+    FileSystem::IFile *remote_file = nullptr;
+    if (image_service.global_fs.p2pfs != nullptr) {
+        remote_file = image_service.global_fs.p2pfs->open(url.c_str(), O_RDONLY);
+        if (remote_file == nullptr) {
+            LOG_WARN("open remote file:` from p2p failed, open from registry");
+        }
+    }
+    if (remote_file == nullptr) {
+        remote_file = image_service.global_fs.remote_fs->open(url.c_str(), O_RDONLY);
+    }
     if (!remote_file) {
-        if (errno == EPERM)
+        if (errno == EPERM || errno == EACCES)
             set_auth_failed();
         else
             set_failed("failed to open remote file " + url);
