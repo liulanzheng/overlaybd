@@ -20,6 +20,7 @@ int P2pAdaptorFile::reauth() {
     auto url = std::string(buf);
     auto p = url.find("data?");
     auto unescape_url = curl_unescape(url.substr(0, p).c_str(), p);
+    DEFER({ curl_free(unescape_url); });
     std::string p2pfs_pathname = "/" + std::string(unescape_url) + url.substr(p);
     // LOG_INFO("p2p_path:`", p2pfs_pathname);
     m_file = m_underlayfs->open(p2pfs_pathname.c_str(), O_RDONLY);
@@ -47,7 +48,7 @@ ssize_t P2pAdaptorFile::pread(void *buf, size_t count, off_t offset) {
                 // read failed
                 delete backup_file;
                 LOG_ERROR_RETURN(0, ret, "p2p read failed and read backup file failed for `",
-                             m_pathname);
+                                 m_pathname);
             }
             // use backup file
             delete m_file;

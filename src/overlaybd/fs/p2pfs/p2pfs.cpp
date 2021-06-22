@@ -125,6 +125,25 @@ int P2PFile::close() {
     return 0;
 }
 
+static std::string transform(const char *path) {
+    // since checked fs usually cannot keep folder structure
+    // here is the Fn_trans_func, keep only basename
+    // seperate parameters firstly
+    std::string fn(path);
+    fn = fn.substr(0, fn.find('?'));
+    auto basename = strrchr(fn.data(), '/');
+    if (basename) {
+        if (strcmp(basename, "/data") == 0) {
+            fn = fn.substr(0, basename - fn.data());
+            // case is httpfs formed
+            return "/sha256:" + fn.substr(fn.rfind('/') + 1);
+        } else
+            return basename;
+    }
+    return path;
+}
+
+
 IFileSystem* new_p2pfs(const NodeID& root, const NodeID& myid,
                        IFileSystem* metafs, ConnectionTracer* tracer,
                        bool balanced, int ttl, int retry_time,
@@ -133,7 +152,7 @@ IFileSystem* new_p2pfs(const NodeID& root, const NodeID& myid,
     if (myid.addr == 0 && myid.port == 0) {
         if (!balanced) {
             IFileSystem* checkedfs = nullptr;
-            if (metafs) checkedfs = new_checkedfs_adaptor_v1(nullptr, metafs);
+            if (metafs) checkedfs = new_checkedfs_adaptor_v1(nullptr, metafs, transform);
             P2PClient* p2pClient =
                 new_p2pclient(myid, root, ttl, retry_time,
                               domain, connect_timeout, rpc_timeout, checkedfs, root_ssl);
