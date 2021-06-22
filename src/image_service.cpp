@@ -290,6 +290,7 @@ int ImageService::init() {
         }
         global_fs.cachefs = registry_cache_fs;
         global_fs.srcfs = registry_fs;
+        global_fs.metafs = metafs;
     }
 
 
@@ -298,7 +299,7 @@ int ImageService::init() {
         auto p2pfs = FileSystem::new_p2pfs(FileSystem::NodeID(Net::EndPoint{
                 Net::IPAddr(global_conf.p2p().ip().c_str()),
                 (uint16_t)global_conf.p2p().port()
-            }), FileSystem::NodeID(), nullptr, nullptr, false, 200, 0,
+            }), FileSystem::NodeID(), global_fs.metafs , nullptr, false, 200, 0,
                 nullptr, 1000UL * 1000, 1000000UL * global_conf.p2p().timeout());
         auto metafs = FileSystem::new_localfs_adaptor(global_conf.checksumPath().c_str());
         LOG_INFO("create checkedfs, checksum path: `", global_conf.checksumPath());

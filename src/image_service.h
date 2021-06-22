@@ -78,6 +78,7 @@ struct GlobalFs {
     FileSystem::IFileSystem *cachefs = nullptr;
     FileSystem::IFileSystem *srcfs = nullptr;
     FileSystem::IFileSystem *localfs = nullptr;
+    FileSystem::IFileSystem *metafs = nullptr;
 };
 
 struct ImageFile;
