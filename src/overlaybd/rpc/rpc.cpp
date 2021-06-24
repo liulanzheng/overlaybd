@@ -403,6 +403,8 @@ namespace RPC
 
         ~StubPoolImpl() {
             delete m_pool;
+            delete tcpclient;
+            delete tlsclient;
         }
 
         Stub* get_stub(const Net::EndPoint& endpoint, bool tls) override {

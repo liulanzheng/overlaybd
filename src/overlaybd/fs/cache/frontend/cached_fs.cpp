@@ -36,6 +36,8 @@ public:
     }
 
     ~CachedFs() {
+        // TODO add ownership
+        delete allocator_;
         delete fileCachePool_;
     }
 

@@ -343,6 +343,8 @@ void sigint_handler(int signal = SIGINT) {
     if (main_loop != nullptr) {
         delete main_loop;
         main_loop = nullptr;
+        delete imgservice;
+        imgservice = nullptr;
     }
 }
 

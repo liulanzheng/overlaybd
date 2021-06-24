@@ -111,6 +111,7 @@ public:
     ~P2PClientImpl() {
         delete m_pool;
         delete m_checkedfs;
+        delete m_metas;
     }
 
     virtual ssize_t preadv(Net::EndPoint* ep, const char* filename,

@@ -65,6 +65,7 @@ public:
 
     virtual ~P2PFileSystem() override {
         delete m_refs;
+        delete m_srcfs;
         if (m_client_ownership)
             delete m_client;
     }
@@ -110,9 +111,11 @@ public:
 
 P2PFile::P2PFile(IFile *ref, const std::string &filename, P2PFileSystem *fs)
     : ForwardFile(ref), m_fs(fs), m_filename(filename) {
+    LOG_INFO("create p2pfile `", m_filename);
 }
 
 P2PFile::~P2PFile() {
+    LOG_INFO("delete p2pfile `", m_filename);
     close();
 }
 

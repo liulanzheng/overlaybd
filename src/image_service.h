@@ -79,6 +79,7 @@ struct GlobalFs {
     FileSystem::IFileSystem *srcfs = nullptr;
     FileSystem::IFileSystem *localfs = nullptr;
     FileSystem::IFileSystem *metafs = nullptr;
+    FileSystem::IFileSystem *checkedfs = nullptr;
 };
 
 struct ImageFile;
@@ -86,6 +87,7 @@ struct ImageFile;
 class ImageService {
 public:
     ImageService() {}
+    ~ImageService();
     int init();
     ImageFile *create_image_file(const char *config_path);
     bool create_dir(const char *dirname);

@@ -23,7 +23,7 @@
 
 namespace FileSystem {
 
-class P2pAdaptorFile : public ForwardFile {
+class P2pAdaptorFile : public ForwardFile_Ownership {
 public:
     IFileSystem *m_underlayfs = nullptr;
     IFileSystem *m_backupfs = nullptr;
@@ -32,7 +32,7 @@ public:
 
     P2pAdaptorFile(IFileSystem *underlayfs, IFile *rfile, const char *pathname,
                    IFileSystem *backupfs)
-        : ForwardFile(nullptr), m_underlayfs(underlayfs), m_rfile(rfile), m_pathname(pathname),
+        : ForwardFile_Ownership(nullptr, true), m_underlayfs(underlayfs), m_rfile(rfile), m_pathname(pathname),
           m_backupfs(backupfs){};
 
     virtual ~P2pAdaptorFile() {

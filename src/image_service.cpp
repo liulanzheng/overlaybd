@@ -291,6 +291,7 @@ int ImageService::init() {
         global_fs.cachefs = registry_cache_fs;
         global_fs.srcfs = registry_fs;
         global_fs.metafs = metafs;
+        global_fs.checkedfs = checkedfs;
     }
 
 
@@ -301,8 +302,8 @@ int ImageService::init() {
                 (uint16_t)global_conf.p2p().port()
             }), FileSystem::NodeID(), global_fs.metafs , nullptr, false, 200, 0,
                 nullptr, 1000UL * 1000, 1000000UL * global_conf.p2p().timeout());
-        auto metafs = FileSystem::new_localfs_adaptor(global_conf.checksumPath().c_str());
-        LOG_INFO("create checkedfs, checksum path: `", global_conf.checksumPath());
+        // auto metafs = FileSystem::new_localfs_adaptor(global_conf.checksumPath().c_str());
+        // LOG_INFO("create checkedfs, checksum path: `", global_conf.checksumPath());
         // auto checkedfs = FileSystem::new_checkedfs_adaptor_v1(p2pfs, metafs, meta_name_trans_v2);
         global_fs.p2pfs = new FileSystem::P2pAdaptorFS(p2pfs, global_fs.srcfs, global_fs.remote_fs);
         LOG_INFO("p2p fs created");
@@ -385,6 +386,15 @@ bool ImageService::copy_checksum_file(const char* src, const char* dst_basename)
     return true;
 }
 
+ImageService::~ImageService() {
+    LOG_INFO("delete image service");
+    delete global_fs.p2pfs;
+    delete global_fs.remote_fs;
+    delete global_fs.checkedfs;
+    delete global_fs.srcfs;
+    delete global_fs.localfs;
+    delete global_fs.metafs;
+}
 
 ImageService *create_image_service() {
     ImageService *ret = new ImageService();

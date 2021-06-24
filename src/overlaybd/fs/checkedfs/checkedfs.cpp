@@ -443,7 +443,7 @@ public:
         : ForwardFS(fs), m_metafs(mfs), m_def_seg_size(def_seg_size), m_build_initial_checksum(build_initial_checksum) {
     }
 
-    ~CheckedFSAdaptor() { delete m_metafs; }
+    ~CheckedFSAdaptor() { safe_delete(m_metafs); }
 
     // open with meta file, if meta not exists, create one if def_seg_size is set
     IFile *open(const char *pathname, int flags, mode_t mode) {
