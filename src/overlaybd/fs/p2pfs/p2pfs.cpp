@@ -60,7 +60,7 @@ public:
                   uint64_t refresh_timer = 10UL * 1000 * 1000)
         : m_client_ownership(client_ownership), m_client(client) {
         m_srcfs = client->getfs();
-        m_refs = new ObjectCache<std::string, IFile *>(60 * 1024 * 1024);
+        m_refs = new ObjectCache<std::string, IFile *>(refresh_timer);
     }
 
     virtual ~P2PFileSystem() override {

@@ -217,13 +217,11 @@ ISwitchFile *new_switch_file(IFile *file, bool local, const char* filepath) {
 }
 
 ISwitchFile *new_switch_file_with_download(IFile *file, IFile *download_src, const std::string &digest,
-                        const char* filepath, int download_delay, int extra, int max_MB_ps, int max_try) {
+                        const char* filepath, int download_delay, int max_MB_ps, int max_try) {
     SwitchFile *ret = (SwitchFile*) new_switch_file(file, false, filepath);
     if (ret == nullptr)
         return nullptr;
-    extra = (extra < 0) ? 30 : extra;
-    int delay_sec = (rand() % extra) + download_delay;
-    ret->start_download(download_src, digest, delay_sec, max_MB_ps, max_try);
+    ret->start_download(download_src, digest, download_delay, max_MB_ps, max_try);
     return ret;
 }
 

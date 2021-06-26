@@ -30,5 +30,5 @@ public:
 extern "C" ISwitchFile *new_switch_file(IFile *file, bool local=false, const char* filepath=nullptr);
 
 extern "C" ISwitchFile *new_switch_file_with_download(IFile *file, IFile *source, const std::string &digest, const char* file_path,
-                                                        int download_delay, int extra, int max_MB_ps, int max_try);
+                                                        int download_delay, int max_MB_ps, int max_try);
 } // namespace FileSystem

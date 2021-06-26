@@ -43,7 +43,6 @@ struct DownloadConfig : public ConfigUtils::Config {
 
     APPCFG_PARA(enable, bool, false);
     APPCFG_PARA(delay, int, 300);
-    APPCFG_PARA(delayExtra, int, 30);
     APPCFG_PARA(maxMBps, int, 100);
     APPCFG_PARA(tryCnt, int, 5);
 };

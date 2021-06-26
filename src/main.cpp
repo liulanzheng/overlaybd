@@ -330,6 +330,7 @@ static void dev_close(struct tcmu_device *dev) {
     delete odev->file;
     delete odev;
     close_cnt++;
+    malloc_trim(128 * 1024);
     if (close_cnt == 500) {
         malloc_trim(128 * 1024);
         close_cnt = 0;
@@ -382,16 +383,16 @@ int main(int argc, char **argv) {
         LOG_ERROR("failed to get max open fd limit");
         return ret;
     }
-    if (rlim.rlim_max < MAX_OPEN_FD) {
-        rlim.rlim_max = MAX_OPEN_FD;
-        ret = setrlimit(RLIMIT_NOFILE, &rlim);
-        if (ret == -1) {
-            LOG_ERROR("failed to set max open fd to [soft: ` hard: `]",
-                      (long long int)rlim.rlim_cur,
-                      (long long int)rlim.rlim_max);
-            return ret;
-        }
-    }
+    // if (rlim.rlim_max < MAX_OPEN_FD) {
+    //     rlim.rlim_max = MAX_OPEN_FD;
+    //     ret = setrlimit(RLIMIT_NOFILE, &rlim);
+    //     if (ret == -1) {
+    //         LOG_ERROR("failed to set max open fd to [soft: ` hard: `]",
+    //                   (long long int)rlim.rlim_cur,
+    //                   (long long int)rlim.rlim_max);
+    //         return ret;
+    //     }
+    // }
 
     /*
      * If this is a restart we need to prevent new nl cmds from being

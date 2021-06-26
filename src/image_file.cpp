@@ -134,7 +134,7 @@ FileSystem::RefFile *ImageFile::__open_ro_dir_share(const std::string &dir,
         FileSystem::IFile *src_file = image_service.global_fs.srcfs->open(url.c_str(), O_RDONLY);
         auto target_file = dir + "/" + COMMIT_FILE_NAME;
         switch_file = FileSystem::new_switch_file_with_download(remote_file, src_file, digest, target_file.c_str(),
-            conf.download().delay(), conf.download().delayExtra(), conf.download().maxMBps(), conf.download().tryCnt());
+            conf.download().delay(), conf.download().maxMBps(), conf.download().tryCnt());
     } else {
         switch_file = FileSystem::new_switch_file(remote_file);
     }

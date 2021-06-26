@@ -1,13 +1,13 @@
 {
     "logLevel": 1,
-    "registryCacheDir": "/opt/overlaybd/registry_cache",
+    "registryCacheDir": "/var/lib/dadi/registryfs_cache",
     "registryCacheSizeGB": 4,
-    "credentialFilePath": "/opt/overlaybd/cred.json",
+    "credentialFilePath": "/var/lib/aliyun-acr/.acceleration-suite/config.json",
     "ioEngine": 1,
     "download": {
         "enable": true,
-        "delay": 600,
-        "maxMBps": 100
+        "delay": 1200,
+        "maxMBps": 20
     },
     "enableAudit": true,
     "auditPath": "/var/log/overlaybd-audit.log",

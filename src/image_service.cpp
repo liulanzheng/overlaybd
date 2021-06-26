@@ -277,9 +277,9 @@ int ImageService::init() {
         LOG_INFO("create cache with size: ` GB",
                  global_conf.registryCacheSizeGB());
         global_fs.remote_fs = FileSystem::new_full_file_cached_fs(
-            checkedfs, registry_cache_fs, 256 * 1024 /* refill unit 256KB */,
+            checkedfs, registry_cache_fs, 1024 * 1024 /* refill unit 1M */,
             global_conf.registryCacheSizeGB() /*GB*/, 10000000,
-            (uint64_t)1048576 * 4096, nullptr);
+            (uint64_t)1048576 * 1024, nullptr);
 
         if (global_fs.remote_fs == nullptr) {
             delete registry_fs;
