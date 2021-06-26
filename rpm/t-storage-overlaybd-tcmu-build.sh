@@ -1,10 +1,10 @@
 #!/bin/bash
 
-yum install alios7u-gcc-6-repo.noarch -y
-yum install alios7u-2_17-gcc-6-repo.noarch -y
-yum install gcc gcc-c++ libstdc++-static gdb coreutils binutils bash -y
-yum install cmake -b test -y
-yum install libaio-devel libcurl-devel openssl-devel libnl3-devel glib2-devel -y
+sudo yum install alios7u-gcc-6-repo.noarch -y
+sudo yum install alios7u-2_17-gcc-6-repo.noarch -y
+sudo yum install gcc gcc-c++ libstdc++-static gdb coreutils binutils bash -y
+sudo yum install cmake -b test -y
+sudo yum install libaio-devel libcurl-devel openssl-devel libnl3-devel glib2-devel -y
 
 mkdir build
 cd build
