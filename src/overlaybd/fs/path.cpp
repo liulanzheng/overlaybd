@@ -102,6 +102,9 @@ namespace FileSystem
         } else {
             memcpy(path, pathname.begin(), len);
         }
+        if (path[len-1] != '/')
+            path[len++] = '/';
+
         path[len] = '\0';
 
         for (size_t i=1; i<len; i++) {

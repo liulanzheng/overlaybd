@@ -22,6 +22,7 @@
 #include "overlaybd/fs/cache/cache.h"
 #include "overlaybd/fs/filesystem.h"
 #include "overlaybd/fs/localfs.h"
+#include "overlaybd/fs/path.h"
 #include "overlaybd/fs/registryfs/registryfs.h"
 #include "overlaybd/fs/checkedfs/checkedfs.h"
 #include "overlaybd/fs/tar_file.h"
@@ -125,7 +126,8 @@ bool ImageService::create_dir(const char *dirname) {
     if (global_fs.localfs->access(dirname, 0) == 0) {
         return true;
     }
-    if (global_fs.localfs->mkdir(dirname, 0644) == 0) {
+
+    if (mkdir_recursive(dirname, global_fs.localfs) == 0) {
         LOG_INFO("dir ` doesn't exist. create succ.", dirname);
         return true;
     }

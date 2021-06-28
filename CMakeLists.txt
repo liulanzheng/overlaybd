@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.11)
 
 project(
-  overlaybd
-  VERSION 0.3.0
+  lsmd
+  VERSION 4.0.0
   LANGUAGES C CXX
 )
 enable_language(C ASM)
