@@ -95,9 +95,16 @@ target_link_libraries(overlaybd-tcmu
 
 
 install(TARGETS overlaybd-tcmu DESTINATION /opt/overlaybd/bin)
-install(FILES example_config/overlaybd.json DESTINATION /etc/overlaybd/)
-install(FILES example_config/cred.json DESTINATION /opt/overlaybd/)
 
+if (TARGET_TAG STREQUAL "aliyun")
+  install(FILES example_config/overlaybd.aliyun.json DESTINATION /etc/overlaybd/ RENAME overlaybd.json)
+elseif (TARGET_TAG STREQUAL "asicloud")
+  install(FILES example_config/overlaybd.asicloud.json DESTINATION /etc/overlaybd/ RENAME overlaybd.json)
+else ()
+  install(FILES example_config/overlaybd.json DESTINATION /etc/overlaybd/)
+endif()
+
+install(FILES example_config/cred.json DESTINATION /opt/overlaybd/)
 install(FILES example_config/overlaybd-tcmu.service DESTINATION /usr/lib/systemd/system/)
 
 add_subdirectory(tools)

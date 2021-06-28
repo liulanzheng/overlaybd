@@ -1,0 +1,21 @@
+{
+    "logLevel": 1,
+    "registryCacheDir": "/var/lib/dadi/registryfs_cache",
+    "registryCacheSizeGB": 10,
+    "credentialFilePath": "/var/lib/aliyun-acr/.acceleration-suite/config.json",
+    "ioEngine": 1,
+    "download": {
+        "enable": true,
+        "delay": 600,
+        "maxMBps": 20
+    },
+    "enableAudit": true,
+    "auditPath": "/var/log/overlaybd-audit.log",
+    "p2p": {
+        "enable": false,
+        "ip": "127.0.0.1",
+        "port": 9877,
+        "timeout": 10
+    },
+    "checksumPath": "/var/lib/dadi/checksum"
+}
