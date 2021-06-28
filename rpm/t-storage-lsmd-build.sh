@@ -15,7 +15,8 @@ fi
 CUR_DIR=$(cd "$(dirname "$0")" && pwd)
 cd $CUR_DIR
 ROOT=$CUR_DIR/../
-echo "compile lsmd..."
+echo "install deps"
+
 
 TAG=$5
 sudo yum clean all
@@ -38,12 +39,16 @@ if [ -n "$TAG" ]; then
     RELEASE=$RELEASE.$TAG
 fi
 
+echo "cmake"
 
 cd $ROOT
 mkdir build
 cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release -DTARGET_TAG=$5 -DRPM_VERSION=$3-$RELEASE
 make -j32
+
+echo "cpack"
+
 sudo cpack
 
 cd $CUR_DIR
