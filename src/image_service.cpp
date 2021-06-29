@@ -42,7 +42,7 @@
 #include <vector>
 
 const std::string DEFAULT_CONFIG_PATH = "/etc/overlaybd/overlaybd.json";
-const int LOG_SIZE_MB = 10;
+const int LOG_SIZE_MB = 100;
 const int LOG_NUM = 3;
 
 struct ImageRef {
@@ -379,9 +379,7 @@ bool ImageService::copy_checksum_file(const char* src, const char* dst_basename)
         LOG_DEBUG("checksum file ` already exists.", dst);
         return true;
     }
-    LOG_INFO("try to unlink old symbol link: `, ret: `",
-                    dst, global_fs.localfs->unlink(dst.c_str()));
-
+    global_fs.localfs->unlink(dst.c_str());
     if (global_fs.localfs->symlink(src, dst.c_str()) != 0) {
         LOG_ERRNO_RETURN(0, -1, "create symbol link failed: ` -> `", src, dst.c_str());
     }

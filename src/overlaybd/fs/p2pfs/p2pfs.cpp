@@ -28,7 +28,7 @@ public:
     int close() override;
 
 protected:
-    P2PFileSystem *m_fs;
+    P2PFileSystem *m_fs = nullptr;
     std::string m_filename;
 };
 
@@ -111,16 +111,14 @@ public:
 
 P2PFile::P2PFile(IFile *ref, const std::string &filename, P2PFileSystem *fs)
     : ForwardFile(ref), m_fs(fs), m_filename(filename) {
-    LOG_INFO("create p2pfile `", m_filename);
 }
 
 P2PFile::~P2PFile() {
-    LOG_INFO("delete p2pfile `", m_filename);
     close();
 }
 
 int P2PFile::close() {
-    if (!m_fs) {
+    if (m_fs) {
         auto fs = m_fs;
         m_fs = nullptr;
         fs->release(m_filename);
