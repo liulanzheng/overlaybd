@@ -7,7 +7,7 @@ Conflicts=shutdown.target
 
 [Service]
 LimitNOFILE=1048576
-LimitCORE=infinity
+LimitCORE=0
 Type=simple
 
 ExecStartPre=/sbin/modprobe target_core_user
