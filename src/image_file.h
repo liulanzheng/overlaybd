@@ -52,13 +52,14 @@ public:
     }
 
     ~ImageFile() {
-        if (upper_file != nullptr) {
-            delete upper_file;
+        if (m_file != lower_file) {
+            if (upper_file != nullptr) {
+                delete upper_file;
+            }
+            if (lower_file != nullptr) {
+                delete lower_file;
+            }
         }
-        if (lower_file != nullptr) {
-            delete lower_file;
-        }
-
         delete m_prefetcher;
     }
 
@@ -72,8 +73,7 @@ public:
         return ret;
     }
 
-    ssize_t pwritev(const struct iovec *iov, int iovcnt,
-                    off_t offset) override {
+    ssize_t pwritev(const struct iovec *iov, int iovcnt, off_t offset) override {
         if (read_only) {
             LOG_ERROR_RETURN(EROFS, -1, "writing read only file");
         }
@@ -84,15 +84,16 @@ public:
         return m_file->preadv(iov, iovcnt, offset);
     }
 
-    int fdatasync() override { return m_file->fdatasync(); }
+    int fdatasync() override {
+        return m_file->fdatasync();
+    }
 
     int fallocate(int mode, off_t offset, off_t len) override {
         return m_file->fallocate(mode, offset, len);
     }
 
     void set_auth_failed();
-    int open_lower_layer(FileSystem::IFile *&file,
-                         ImageConfigNS::LayerConfig &layer, int index);
+    int open_lower_layer(FileSystem::IFile *&file, ImageConfigNS::LayerConfig &layer, int index);
 
     int close() {
         m_status = -1;
@@ -106,9 +107,8 @@ public:
     uint32_t block_size;
     bool read_only = false;
 
-
 private:
-    FileSystem::Prefetcher* m_prefetcher = nullptr;
+    FileSystem::Prefetcher *m_prefetcher = nullptr;
     ImageConfigNS::ImageConfig conf;
     ImageService &image_service;
     LSMT::IFileRW *upper_file = nullptr;
@@ -122,8 +122,8 @@ private:
     LSMT::IFileRW *open_upper(ImageConfigNS::UpperConfig &);
 
     FileSystem::IFile *__open_ro_file(const std::string &);
-    FileSystem::IFile *__open_ro_dir(const std::string &dir,
-                                        const std::string &, const uint64_t, int);
-    FileSystem::RefFile *__open_ro_dir_share(const std::string &dir,
-                                        const std::string &, const uint64_t);
+    FileSystem::IFile *__open_ro_dir(const std::string &dir, const std::string &, const uint64_t,
+                                     int);
+    FileSystem::RefFile *__open_ro_dir_share(const std::string &dir, const std::string &,
+                                             const uint64_t);
 };
