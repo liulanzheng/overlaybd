@@ -397,6 +397,8 @@ namespace RPC
             tlsclient = Net::new_tls_socket_client();
             tcpclient->timeout(connect_timeout);
             tlsclient->timeout(connect_timeout);
+            tcpclient->setsockopt(IPPROTO_TCP, TCP_NODELAY, 1);
+            tlsclient->setsockopt(IPPROTO_TCP, TCP_NODELAY, 1);
             m_pool = new ObjectCache<Net::EndPoint, RPC::Stub*>(expiration);
             m_rpc_timeout = rpc_timeout;
         }
