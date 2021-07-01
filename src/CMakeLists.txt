@@ -53,7 +53,9 @@ file(GLOB SOURCE_IMAGE
   switch_file.cpp
   bk_download.cpp
   prefetch.cpp
+  prefetch_v2.cpp
   p2p_adaptor.cpp
+  common_func.cpp
 )
 
 add_library(image_lib STATIC

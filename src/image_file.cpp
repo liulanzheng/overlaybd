@@ -35,10 +35,13 @@
 #include "image_file.h"
 #include "sure_file.h"
 #include "switch_file.h"
+#include "common_func.h"
+#include "prefetch.h"
 
 #define PARALLEL_LOAD_INDEX 32
 const std::string COMMIT_FILE_NAME = ".commit";
 const std::string CHECKSUM_FILE_NAME = ".checksum_file";
+const std::string LAYER_OSS_URL_FILE_NAME  = ".oss_url";
 
 
 FileSystem::IFile *ImageFile::__open_ro_file(const std::string &path) {
@@ -349,35 +352,69 @@ ERROR_EXIT:
     return nullptr;
 }
 
+static bool get_file_sha256_by_ossurl(const std::string oss_url, std::string &sha256) {
+    const std::string flag = "sha256:";
+    auto const pos = oss_url.rfind(flag);
+    if (pos == std::string::npos) {
+        LOG_ERROR("Failed to find sha256 in oss_url:`", oss_url);
+        return false;
+    }
+    sha256 = oss_url.substr(pos + flag.size());
+    LOG_INFO("get sha256:` from oss_url:`", sha256, oss_url);
+    return true;
+}
+
+int ImageFile::initialize_prefetcher_v1(const std::string &uppermost_layer_dir) {
+    LOG_INFO("Prefetch V1: uppermost_layer_dir `", uppermost_layer_dir);
+    std::string oss_url_file_path = uppermost_layer_dir + "/" + LAYER_OSS_URL_FILE_NAME;
+    std::string oss_url = CommonFunc::get_file_content(oss_url_file_path);
+    if (oss_url.empty()) {
+        LOG_ERROR_RETURN(0, -1, "oss_url of uppermost_layer_dir is empty");
+    }
+    std::string urlsha256;
+    if (!get_file_sha256_by_ossurl(oss_url, urlsha256)) {
+        LOG_ERROR_RETURN(0, -1, "parse oss_url failed.");
+    }
+    std::string uppermost_layer_digest = "sha256:" + urlsha256;
+    m_prefetcher = FileSystem::new_prefetcher(image_service.global_conf.prefetchConfig().traceDir(), uppermost_layer_digest);
+    return 0;
+}
+
+int ImageFile::initialize_prefetcher_v2(const std::string &uppermost_layer_dir) {
+    LOG_INFO("Prefetch V2: uppermost_layer_dir `", uppermost_layer_dir);
+    std::string trace_path = uppermost_layer_dir + "/.trace";
+    if (!conf.recordTracePath().empty() && access(trace_path.c_str(), F_OK) == 0) {
+        LOG_WARN("Trace already exists in layer. Ignore and record the new one");
+    }
+
+    if (!conf.recordTracePath().empty()) {
+        LOG_INFO("Prefetch V2: recordTracePath = `", conf.recordTracePath());
+        trace_path = conf.recordTracePath();
+    }
+    if (FileSystem::Prefetcher::detect_mode(trace_path) != FileSystem::Prefetcher::Mode::Disabled) {
+        m_prefetcher = FileSystem::new_prefetcher_v2(trace_path);
+    }
+    return 0;
+}
+
 int ImageFile::init_image_file() {
     LSMT::IFileRW *stack_ret = nullptr;
     ImageConfigNS::UpperConfig upper;
     bool record_no_download = false;
     bool has_error = false;
     auto lowers = conf.lowers();
+    std::string uppermost_layer_dir = lowers.back().dir();
 
-    if (conf.accelerationLayer() && !conf.recordTracePath().empty()) {
-        LOG_ERROR("Cannot record trace while acceleration layer exists");
-        goto ERROR_EXIT;
-
-    } else if (conf.accelerationLayer() && !lowers.empty()) {
-        std::string accel_layer = lowers.back().dir();
-        lowers.pop_back();
-        LOG_INFO("Acceleration layer found at `, ignore the last lower", accel_layer);
-
-        std::string trace_file = accel_layer + "/trace";
-        if (FileSystem::Prefetcher::detect_mode(trace_file) == FileSystem::Prefetcher::Mode::Replay) {
-            m_prefetcher = FileSystem::new_prefetcher(trace_file);
+    if (!image_service.global_conf.prefetchConfig().disable()) {
+        // 为FC做兼容：如果/opt/lsmd/prefetch目录存在，则使用prefetcher V1，否则使用prefetcher V2
+        if (image_service.global_conf.prefetchConfig().traceDir().empty()) {
+            LOG_ERROR_RETURN(0, -1, "Prefetch: empty option of traceDir");
         }
-
-    } else if (!conf.recordTracePath().empty()) {
-        if (FileSystem::Prefetcher::detect_mode(conf.recordTracePath()) !=
-            FileSystem::Prefetcher::Mode::Record) {
-            LOG_ERROR("Prefetch: incorrect mode for trace recording");
-            goto ERROR_EXIT;
+        if (access(image_service.global_conf.prefetchConfig().traceDir().c_str(), F_OK) == 0) {
+            initialize_prefetcher_v1(uppermost_layer_dir);
+        } else {
+            initialize_prefetcher_v2(uppermost_layer_dir);
         }
-        m_prefetcher = FileSystem::new_prefetcher(conf.recordTracePath());
-        record_no_download = true;
     }
 
     upper.CopyFrom(conf.upper(), upper.GetAllocator());

@@ -126,4 +126,6 @@ private:
                                      int);
     FileSystem::RefFile *__open_ro_dir_share(const std::string &dir, const std::string &,
                                              const uint64_t);
+    int initialize_prefetcher_v1(const std::string& uppermost_layer_dir);
+    int initialize_prefetcher_v2(const std::string& uppermost_layer_dir);
 };
