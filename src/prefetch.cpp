@@ -1,21 +1,3 @@
-/*
- * prefetch.cpp
- *
- * Copyright (C) 2021 Alibaba Group.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * See the file COPYING included with this distribution for more details.
- */
-
 #include <memory>
 #include <vector>
 #include <map>
@@ -28,9 +10,10 @@
 #include "prefetch.h"
 #include "overlaybd/fs/forwardfs.h"
 #include "overlaybd/fs/localfs.h"
-#include "overlaybd/fs/zfile/crc32/crc32c.h"
+#include "overlaybd/fs/checkedfs/tool/crc32c.h"
 #include "overlaybd/alog.h"
 #include "overlaybd/alog-stdstring.h"
+#include "overlaybd/rpc/serialize.h"
 #include "overlaybd/photon/thread11.h"
 
 using namespace std;
@@ -52,51 +35,72 @@ private:
 
 class PrefetcherImpl : public Prefetcher {
 public:
-    explicit PrefetcherImpl(const string& trace_file_path) {
-        // Detect mode
-        size_t file_size = 0;
-        m_mode = detect_mode(trace_file_path, &file_size);
-        m_lock_file_path = trace_file_path + ".lock";
-        m_ok_file_path = trace_file_path + ".ok";
-        LOG_INFO("Prefetch: run with mode `, trace file is `", m_mode, trace_file_path);
+    PrefetcherImpl(const string& prefetch_dir, const string& trace_file_name) {
+        // Create prefetch dir
+        string dir_fixed = prefetch_dir;
+        if (dir_fixed[dir_fixed.size() - 1] != '/') {
+            dir_fixed += '/';
+        }
+        if (access(dir_fixed.c_str(), F_OK) != 0 && mkdir(dir_fixed.c_str(), 0666) != 0) {
+            if (errno != EEXIST) {
+                m_mode = Mode::Disabled;
+                LOG_ERROR("Prefetch: create dir failed");
+                return;
+            }
+        }
+        string full_path = dir_fixed + trace_file_name;
+
+        // Choose mode
+        int flags = 0;
+        struct stat buf = {};
+        int ret = stat(full_path.c_str(), &buf);
+        if (ret != 0) {
+            m_mode = Mode::Disabled;
+        } else if (buf.st_size == 0) {
+            m_mode = Mode::Record;
+            flags = O_WRONLY;
+        } else {
+            m_mode = Mode::Replay;
+            flags = O_RDONLY;
+        }
+        m_replay_stopped = false;
+        m_record_stopped = false;
+        m_buffer_released = false;
+        m_lock_file_name = full_path + ".lock";
+        m_ok_file_name = full_path + ".ok";
+        LOG_INFO("Prefetch: run with mode `, trace file is `", m_mode, full_path);
 
         // Open trace file
         if (m_mode != Mode::Disabled) {
-            int flags = m_mode == Mode::Record ? O_WRONLY : O_RDONLY;
-            m_trace_file = FileSystem::open_localfile_adaptor(trace_file_path.c_str(), flags, 0666, 2);
+            m_trace_file = FileSystem::open_localfile_adaptor(full_path.c_str(), flags, 0666, 2);
+        } else {
+            m_trace_file = nullptr;
         }
 
         // Loop detect lock file if going to record
         if (m_mode == Mode::Record) {
-            int lock_fd = open(m_lock_file_path.c_str(), O_RDWR | O_CREAT | O_TRUNC | O_EXCL, 0666);
+            int lock_fd = open(m_lock_file_name.c_str(), O_RDWR | O_CREAT | O_TRUNC | O_EXCL, 0666);
             close(lock_fd);
-            auto th = photon::thread_create11(&PrefetcherImpl::detect_lock, this);
-            m_detect_thread = photon::thread_enable_join(th);
+            photon::thread_create11(&PrefetcherImpl::detect_lock, this);
         }
 
         // Reload if going to replay
         if (m_mode == Mode::Replay) {
-            reload(file_size);
+            m_replay_threads.resize(REPLAY_CONCURRENCY);
+            reload(buf.st_size);
         }
     }
 
     ~PrefetcherImpl() {
-        if (m_mode == Mode::Record) {
-            m_record_stopped = true;
-            if (m_detect_thread_interruptible) {
-                photon::thread_shutdown((photon::thread*) m_detect_thread);
-            }
-            photon::thread_join(m_detect_thread);
+        if (m_mode == Mode::Record && !m_record_stopped) {
             dump();
-
         } else if (m_mode == Mode::Replay) {
             m_replay_stopped = true;
             for (auto th : m_replay_threads) {
-                photon::thread_shutdown((photon::thread*) th);
+                photon::thread_interrupt((photon::thread*) th);
                 photon::thread_join(th);
             }
         }
-
         if (m_trace_file != nullptr) {
             m_trace_file->close();
             m_trace_file = nullptr;
@@ -125,8 +129,7 @@ public:
         LOG_INFO("Prefetch: Replay ` records from ` layers", m_replay_queue.size(), m_src_files.size());
         for (int i = 0; i < REPLAY_CONCURRENCY; ++i) {
             auto th = photon::thread_create11(&PrefetcherImpl::replay_worker_thread, this);
-            auto join_handle = photon::thread_enable_join(th);
-            m_replay_threads.push_back(join_handle);
+            m_replay_threads[i] = photon::thread_enable_join(th);
         }
     }
 
@@ -143,7 +146,7 @@ public:
             if (trace.op == PrefetcherImpl::TraceOp::READ) {
                 ssize_t n_read = src_file->pread(buf, trace.count, trace.offset);
                 if (n_read != (ssize_t) trace.count) {
-                    LOG_ERROR("Prefetch: replay pread failed: `, `, respect: `, got: `", ERRNO(), trace, trace.count, n_read);
+                    LOG_ERROR("Prefetch: replay pread failed: `, `", ERRNO(), trace);
                     continue;
                 }
             }
@@ -168,10 +171,18 @@ private:
         off_t offset;
     };
 
-    struct TraceHeader {
+    struct TraceHeader : public RPC::Message {
         uint32_t magic = 0;
         size_t data_size = 0;
         uint32_t checksum = 0;
+
+        PROCESS_FIELDS(data_size, checksum);
+    };
+
+    struct TraceContent : public RPC::Message {
+        RPC::array<TraceFormat> formats;
+
+        PROCESS_FIELDS(formats);
     };
 
     static const int MAX_IO_SIZE = 1024 * 1024;
@@ -181,62 +192,52 @@ private:
     vector<TraceFormat> m_record_array;
     queue<TraceFormat> m_replay_queue;
     map<uint32_t, IFile*> m_src_files;
+    IFile* m_trace_file;
+    string m_lock_file_name;
+    string m_ok_file_name;
     vector<photon::join_handle*> m_replay_threads;
-    photon::join_handle* m_detect_thread = nullptr;
-    bool m_detect_thread_interruptible = false;
-    string m_lock_file_path;
-    string m_ok_file_path;
-    IFile* m_trace_file = nullptr;
-    bool m_replay_stopped = false;
-    bool m_record_stopped = false;
-    bool m_buffer_released = false;
+    bool m_replay_stopped;
+    bool m_record_stopped;
+    bool m_buffer_released;
 
     int dump() {
-        if (m_trace_file == nullptr) {
-            return 0;
+        if (access(m_ok_file_name.c_str(), F_OK) != 0) {
+            unlink(m_ok_file_name.c_str());
+            LOG_WARN("Prefetch: OK file exists before dump");
         }
 
-        if (access(m_ok_file_path.c_str(), F_OK) != 0) {
-            unlink(m_ok_file_path.c_str());
-        }
+        TraceContent content;
+        content.formats.assign(m_record_array);
+        RPC::SerializerIOV serializer_content;
+        serializer_content.serialize(content);
+        auto size_content = serializer_content.iov.sum();
 
-        auto close_trace_file = [&]() {
-            if (m_trace_file != nullptr) {
-                m_trace_file->close();
-                m_trace_file = nullptr;
-            }
-        };
-        DEFER(close_trace_file());
-
-        TraceHeader hdr = {};
+        TraceHeader hdr;
         hdr.magic = TRACE_MAGIC;
-        hdr.checksum = 0;       // calculate and re-write checksum later
-        hdr.data_size = sizeof(TraceFormat) * m_record_array.size();
+        hdr.checksum = crc32::crc32c(content.formats.begin(), content.formats.length());
+        hdr.data_size = size_content;
+        RPC::SerializerIOV serializer_hdr;
+        serializer_hdr.serialize(hdr);
+        auto size_hdr = serializer_hdr.iov.sum();
 
-        ssize_t n_written = m_trace_file->write(&hdr, sizeof(TraceHeader));
-        if (n_written != sizeof(TraceHeader)) {
+        ssize_t n_written = m_trace_file->writev(serializer_hdr.iov.iovec(), serializer_hdr.iov.iovcnt());
+        if (n_written != (ssize_t) size_hdr) {
             m_trace_file->ftruncate(0);
             LOG_ERRNO_RETURN(0, -1, "Prefetch: dump write header failed");
         }
 
-        for (auto& each : m_record_array) {
-            hdr.checksum = crc32::crc32c_extend(&each, sizeof(TraceFormat), hdr.checksum);
-            n_written = m_trace_file->write(&each, sizeof(TraceFormat));
-            if (n_written != sizeof(TraceFormat)) {
-                m_trace_file->ftruncate(0);
-                LOG_ERRNO_RETURN(0, -1, "Prefetch: dump write content failed");
-            }
-        }
-
-        n_written = m_trace_file->pwrite(&hdr, sizeof(TraceHeader), 0);
-        if (n_written != sizeof(TraceHeader)) {
+        n_written = m_trace_file->writev(serializer_content.iov.iovec(), serializer_content.iov.iovcnt());
+        if (n_written != (ssize_t) size_content) {
             m_trace_file->ftruncate(0);
-            LOG_ERRNO_RETURN(0, -1, "Prefetch: dump write header(checksum) failed");
+            LOG_ERRNO_RETURN(0, -1, "Prefetch: dump write content failed");
         }
 
-        unlink(m_lock_file_path.c_str());
-
-        int ok_fd = open(m_ok_file_path.c_str(), O_RDWR | O_CREAT | O_TRUNC | O_EXCL, 0666);
+        if (m_trace_file != nullptr) {
+            m_trace_file->close();
+            m_trace_file = nullptr;
+        }
+        unlink(m_lock_file_name.c_str());
+        int ok_fd = open(m_ok_file_name.c_str(), O_RDWR | O_CREAT | O_TRUNC | O_EXCL, 0666);
         if (ok_fd < 0) {
             LOG_ERRNO_RETURN(0, -1, "Prefetch: open OK file failed");
         }
@@ -246,50 +247,49 @@ private:
 
     int reload(size_t trace_file_size) {
         // Reload header
-        TraceHeader hdr = {};
-        ssize_t n_read = m_trace_file->read(&hdr, sizeof(TraceHeader));
+        IOVector iov_hdr;
+        iov_hdr.push_back(sizeof(TraceHeader));
+        ssize_t n_read = m_trace_file->readv(iov_hdr.iovec(), iov_hdr.iovcnt());
         if (n_read != sizeof(TraceHeader)) {
             LOG_ERRNO_RETURN(0, -1, "Prefetch: reload header failed");
         }
-        if (TRACE_MAGIC != hdr.magic) {
+
+        RPC::DeserializerIOV deserializer_hdr;
+        auto ret_hdr = deserializer_hdr.deserialize<TraceHeader>(&iov_hdr);
+        if (TRACE_MAGIC != ret_hdr->magic) {
             LOG_ERROR_RETURN(0, -1, "Prefetch: trace magic mismatch");
         }
-        if (trace_file_size != hdr.data_size + sizeof(TraceHeader)) {
+        if (trace_file_size != ret_hdr->data_size + sizeof(TraceHeader)) {
             LOG_ERROR_RETURN(0, -1, "Prefetch: trace file size mismatch");
         }
 
         // Reload content
-        uint32_t checksum = 0;
-        TraceFormat fmt = {};
-        for (int i = 0; i < hdr.data_size / sizeof(TraceFormat); ++i) {
-            n_read = m_trace_file->read(&fmt, sizeof(TraceFormat));
-            if (n_read != sizeof(TraceFormat)) {
-                LOG_ERRNO_RETURN(0, -1, "Prefetch: reload content failed");
-            }
-            checksum = crc32::crc32c_extend(&fmt, sizeof(TraceFormat), checksum);
-            // Save in memory
-            m_replay_queue.push(fmt);
+        IOVector iov_content;
+        iov_content.push_back(ret_hdr->data_size);
+        n_read = m_trace_file->readv(iov_content.iovec(), iov_content.iovcnt());
+        if (n_read != (ssize_t) ret_hdr->data_size) {
+            LOG_ERRNO_RETURN(0, -1, "Prefetch: reload content failed");
         }
 
-        if (checksum != hdr.checksum) {
-            queue<TraceFormat> tmp;
-            m_replay_queue.swap(tmp);
+        RPC::DeserializerIOV deserializer_content;
+        auto ret_content = deserializer_content.deserialize<TraceContent>(&iov_content);
+        uint32_t checksum = crc32::crc32c(ret_content->formats.begin(), ret_content->formats.length());
+        if (checksum != ret_hdr->checksum) {
             LOG_ERROR_RETURN(0, -1, "Prefetch: reload checksum error");
         }
 
+        // Save in memory
+        for (auto& each : ret_content->formats) {
+            m_replay_queue.push(each);
+        }
         LOG_INFO("Prefetch: Reload ` records", m_replay_queue.size());
         return 0;
     }
 
     int detect_lock() {
-        while (!m_record_stopped) {
-            m_detect_thread_interruptible = true;
-            int ret = photon::thread_sleep(1);
-            m_detect_thread_interruptible = false;
-            if (ret != 0) {
-                break;
-            }
-            if (access(m_lock_file_path.c_str(), F_OK) != 0) {
+        while (true) {
+            photon::thread_sleep(1);
+            if (access(m_lock_file_name.c_str(), F_OK) != 0) {
                 m_record_stopped = true;
                 dump();
                 break;
@@ -307,39 +307,23 @@ LogBuffer& operator<<(LogBuffer& log, const PrefetcherImpl::TraceFormat& f) {
 }
 
 PrefetchFile::PrefetchFile(IFile* src_file, uint32_t layer_index, Prefetcher* prefetcher) :
-        ForwardFile_Ownership(src_file, true),
-        m_layer_index(layer_index),
-        m_prefetcher((PrefetcherImpl*) prefetcher) {
+    ForwardFile_Ownership(src_file, true),
+    m_layer_index(layer_index),
+    m_prefetcher((PrefetcherImpl*) prefetcher) {
     if (m_prefetcher->get_mode() == PrefetcherImpl::Mode::Replay) {
         m_prefetcher->register_src_file(layer_index, src_file);
     }
 }
 
 ssize_t PrefetchFile::pread(void* buf, size_t count, off_t offset) {
-    ssize_t n_read = m_file->pread(buf, count, offset);
-    if (n_read == (ssize_t) count && m_prefetcher->get_mode() == PrefetcherImpl::Mode::Record) {
+    if (m_prefetcher->get_mode() == PrefetcherImpl::Mode::Record) {
         m_prefetcher->record(PrefetcherImpl::TraceOp::READ, m_layer_index, count, offset);
     }
-    return n_read;
+    return m_file->pread(buf, count, offset);
 }
 
-Prefetcher* new_prefetcher(const string& trace_file_path) {
-    return new PrefetcherImpl(trace_file_path);
-}
-
-Prefetcher::Mode Prefetcher::detect_mode(const string& trace_file_path, size_t* file_size) {
-    struct stat buf = {};
-    int ret = stat(trace_file_path.c_str(), &buf);
-    if (file_size != nullptr) {
-        *file_size = buf.st_size;
-    }
-    if (ret != 0) {
-        return Mode::Disabled;
-    } else if (buf.st_size == 0) {
-        return Mode::Record;
-    } else {
-        return Mode::Replay;
-    }
+Prefetcher* new_prefetcher(const string& prefetch_dir, const string& trace_file_name) {
+    return new PrefetcherImpl(prefetch_dir, trace_file_name);
 }
 
 }

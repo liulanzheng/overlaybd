@@ -47,6 +47,13 @@ struct DownloadConfig : public ConfigUtils::Config {
     APPCFG_PARA(tryCnt, int, 5);
 };
 
+struct PrefetchConfig : public ConfigUtils::Config {
+    APPCFG_CLASS;
+
+    APPCFG_PARA(disable, bool, true);
+    APPCFG_PARA(traceDir, std::string, "");    // For prefetcher V1
+};
+
 struct ImageConfig : public ConfigUtils::Config {
     APPCFG_CLASS;
 
@@ -55,9 +62,9 @@ struct ImageConfig : public ConfigUtils::Config {
     APPCFG_PARA(upper, UpperConfig);
     APPCFG_PARA(resultFile, std::string, "");
     APPCFG_PARA(download, DownloadConfig);
-    APPCFG_PARA(accelerationLayer, bool, false);
-    APPCFG_PARA(recordTracePath, std::string, "");
+    APPCFG_PARA(recordTracePath, std::string, "");    // For prefetcher V2
 };
+
 struct P2PConfig : public ConfigUtils::Config {
     APPCFG_CLASS;
 
@@ -81,6 +88,7 @@ struct GlobalConfig : public ConfigUtils::Config {
     APPCFG_PARA(auditPath, std::string, "/var/log/overlaybd-audit.log");
     APPCFG_PARA(p2p, P2PConfig);
     APPCFG_PARA(checksumPath, std::string, "/var/lib/dadi/checksum");
+    APPCFG_PARA(prefetchConfig, PrefetchConfig);
 };
 
 struct AuthConfig : public ConfigUtils::Config {
