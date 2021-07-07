@@ -68,7 +68,7 @@ target_include_directories(image_lib PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/rapidjson/include
 )
 
-add_executable(overlaybd-tcmu main.cpp scsi_helper.cpp)
+add_executable(overlaybd-tcmu main.cpp scsi_helper.cpp obd_device.cpp)
 target_include_directories(overlaybd-tcmu
   PUBLIC libtcmu}
 )

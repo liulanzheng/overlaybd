@@ -22,36 +22,15 @@
 #include "overlaybd/photon/syncio/aio-wrapper.h"
 #include "overlaybd/photon/syncio/fd-events.h"
 #include "overlaybd/photon/syncio/signal.h"
-#include "overlaybd/photon/thread-pool.h"
 #include "overlaybd/photon/thread.h"
 #include "libtcmu.h"
 #include "libtcmu_common.h"
-#include "scsi.h"
-#include "scsi_defs.h"
-#include "scsi_helper.h"
 #include <fcntl.h>
-#include <scsi/scsi.h>
 #include <sys/resource.h>
+#include "obd_device.h"
 
-class TCMUDevLoop;
 
 #define MAX_OPEN_FD 1048576
-
-struct obd_dev {
-    ImageFile *file;
-    TCMUDevLoop *loop;
-    uint32_t aio_pending_wakeups;
-    uint32_t inflight;
-};
-
-struct handle_args {
-    struct tcmu_device *dev;
-    struct tcmulib_cmd *cmd;
-};
-
-class TCMULoop;
-TCMULoop *main_loop = nullptr;
-ImageService *imgservice = nullptr;
 
 class TCMULoop {
 protected:
@@ -90,189 +69,8 @@ public:
     void run() { loop->async_run(); }
 };
 
-void cmd_handler(struct tcmu_device *dev, struct tcmulib_cmd *cmd) {
-    obd_dev *odev = (obd_dev *)tcmu_dev_get_private(dev);
-    ImageFile *file = odev->file;
-    size_t ret = -1;
-    size_t length;
-
-    switch (cmd->cdb[0]) {
-    case INQUIRY:
-        photon::thread_yield();
-        ret =
-            tcmu_emulate_inquiry(dev, NULL, cmd->cdb, cmd->iovec, cmd->iov_cnt);
-        tcmulib_command_complete(dev, cmd, ret);
-        break;
-
-    case TEST_UNIT_READY:
-        photon::thread_yield();
-        ret = tcmu_emulate_test_unit_ready(cmd->cdb, cmd->iovec, cmd->iov_cnt);
-        tcmulib_command_complete(dev, cmd, ret);
-        break;
-
-    case SERVICE_ACTION_IN_16:
-        photon::thread_yield();
-        if (cmd->cdb[1] == READ_CAPACITY_16)
-            ret = tcmu_emulate_read_capacity_16(file->num_lbas,
-                                                file->block_size, cmd->cdb,
-                                                cmd->iovec, cmd->iov_cnt);
-        else
-            ret = TCMU_STS_NOT_HANDLED;
-        tcmulib_command_complete(dev, cmd, ret);
-        break;
-
-    case MODE_SENSE:
-    case MODE_SENSE_10:
-        photon::thread_yield();
-        ret = emulate_mode_sense(dev, cmd->cdb, cmd->iovec, cmd->iov_cnt, file->read_only);
-        tcmulib_command_complete(dev, cmd, ret);
-        break;
-
-    case MODE_SELECT:
-    case MODE_SELECT_10:
-        photon::thread_yield();
-        ret = tcmu_emulate_mode_select(dev, cmd->cdb, cmd->iovec, cmd->iov_cnt);
-        tcmulib_command_complete(dev, cmd, ret);
-        break;
-
-    case READ_6:
-    case READ_10:
-    case READ_12:
-    case READ_16:
-        length = tcmu_iovec_length(cmd->iovec, cmd->iov_cnt);
-        ret = file->preadv(cmd->iovec, cmd->iov_cnt,
-                           tcmu_cdb_to_byte(dev, cmd->cdb));
-        if (ret == length) {
-            tcmulib_command_complete(dev, cmd, TCMU_STS_OK);
-        } else {
-            tcmulib_command_complete(dev, cmd, TCMU_STS_RD_ERR);
-        }
-        break;
-
-    case WRITE_6:
-    case WRITE_10:
-    case WRITE_12:
-    case WRITE_16:
-        length = tcmu_iovec_length(cmd->iovec, cmd->iov_cnt);
-        ret = file->pwritev(cmd->iovec, cmd->iov_cnt,
-                            tcmu_cdb_to_byte(dev, cmd->cdb));
-        if (ret == length) {
-            tcmulib_command_complete(dev, cmd, TCMU_STS_OK);
-        } else {
-            if (errno == EROFS) {
-                tcmulib_command_complete(dev, cmd,
-                                         TCMU_STS_WR_ERR_INCOMPAT_FRMT);
-            }
-            tcmulib_command_complete(dev, cmd, TCMU_STS_WR_ERR);
-        }
-        break;
-
-    case SYNCHRONIZE_CACHE:
-    case SYNCHRONIZE_CACHE_16:
-        ret = file->fdatasync();
-        if (ret == 0) {
-            tcmulib_command_complete(dev, cmd, TCMU_STS_OK);
-        } else {
-            tcmulib_command_complete(dev, cmd, TCMU_STS_WR_ERR);
-        }
-        break;
-
-    case WRITE_SAME:
-    case WRITE_SAME_16:
-        if (cmd->cdb[1] & 0x08) {
-            length = tcmu_iovec_length(cmd->iovec, cmd->iov_cnt);
-            ret = file->fallocate(3, tcmu_cdb_to_byte(dev, cmd->cdb), length);
-            if (ret == 0) {
-                tcmulib_command_complete(dev, cmd, TCMU_STS_OK);
-            } else {
-                tcmulib_command_complete(dev, cmd, TCMU_STS_WR_ERR);
-            }
-        } else {
-            LOG_ERROR("unknown write_same command `", cmd->cdb[0]);
-            tcmulib_command_complete(dev, cmd, TCMU_STS_NOT_HANDLED);
-        }
-        break;
-
-    case MAINTENANCE_IN:
-    case MAINTENANCE_OUT:
-        tcmulib_command_complete(dev, cmd, TCMU_STS_NOT_HANDLED);
-        break;
-
-    default:
-        LOG_ERROR("unknown command `", cmd->cdb[0]);
-        tcmulib_command_complete(dev, cmd, TCMU_STS_NOT_HANDLED);
-        break;
-    }
-
-    // call tcmulib_processing_complete(dev) if needed
-    ++odev->aio_pending_wakeups;
-    int wake_up = (odev->aio_pending_wakeups == 1) ? 1 : 0;
-    while (wake_up) {
-        tcmulib_processing_complete(dev);
-        photon::thread_yield();
-
-        if (odev->aio_pending_wakeups > 1) {
-            odev->aio_pending_wakeups = 1;
-            wake_up = 1;
-        } else {
-            odev->aio_pending_wakeups = 0;
-            wake_up = 0;
-        }
-    }
-
-    odev->inflight--;
-}
-
-void *handle(void *args) {
-    handle_args *obj = (handle_args *)args;
-    cmd_handler(obj->dev, obj->cmd);
-    delete obj;
-    return nullptr;
-}
-
-class TCMUDevLoop {
-protected:
-    EventLoop *loop;
-    struct tcmu_device *dev;
-    int fd;
-    photon::ThreadPool<32> threadpool;
-
-    int wait_for_readable(EventLoop *) {
-        auto ret = photon::wait_for_fd_readable(fd);
-        if (ret < 0) {
-            if (errno == ETIMEDOUT) {
-                return 0;
-            }
-            return -1;
-        }
-        return 1;
-    }
-
-    int on_accept(EventLoop *) {
-        struct tcmulib_cmd *cmd;
-        obd_dev *odev = (obd_dev *)tcmu_dev_get_private(dev);
-        tcmulib_processing_start(dev);
-        while ((cmd = tcmulib_get_next_command(dev, 0)) != NULL) {
-            odev->inflight++;
-            threadpool.thread_create(&handle, new handle_args{dev, cmd});
-        }
-        return 0;
-    }
-
-public:
-    explicit TCMUDevLoop(struct tcmu_device *dev)
-        : dev(dev), loop(new_event_loop({this, &TCMUDevLoop::wait_for_readable},
-                                        {this, &TCMUDevLoop::on_accept})) {
-        fd = tcmu_dev_get_fd(dev);
-    }
-
-    ~TCMUDevLoop() {
-        loop->stop();
-        delete loop;
-    }
-
-    void run() { loop->async_run(); }
-};
+TCMULoop *main_loop = nullptr;
+ImageService *imgservice = nullptr;
 
 static char *tcmu_get_path(struct tcmu_device *dev) {
     char *config = strchr(tcmu_dev_get_cfgstring(dev), '/');
@@ -300,19 +98,13 @@ static int dev_open(struct tcmu_device *dev) {
         LOG_ERROR_RETURN(0, -EPERM, "create image file failed");
     }
 
-    obd_dev *odev = new obd_dev;
-    odev->aio_pending_wakeups = 0;
-    odev->inflight = 0;
-    odev->file = file;
+    ObdDevice *odev = new ObdDevice(dev, file);
 
     tcmu_dev_set_private(dev, odev);
     tcmu_dev_set_block_size(dev, file->block_size);
     tcmu_dev_set_num_lbas(dev, file->num_lbas);
     tcmu_dev_set_unmap_enabled(dev, true);
     tcmu_dev_set_write_cache_enabled(dev, false);
-
-    odev->loop = new TCMUDevLoop(dev);
-    odev->loop->run();
 
     struct timeval end;
     gettimeofday(&end, NULL);
@@ -324,10 +116,7 @@ static int dev_open(struct tcmu_device *dev) {
 
 static int close_cnt = 0;
 static void dev_close(struct tcmu_device *dev) {
-    obd_dev *odev = (obd_dev *)tcmu_dev_get_private(dev);
-    delete odev->loop;
-    odev->file->close();
-    delete odev->file;
+    ObdDevice *odev = (ObdDevice *)tcmu_dev_get_private(dev);
     delete odev;
     close_cnt++;
     malloc_trim(128 * 1024);
@@ -344,8 +133,6 @@ void sigint_handler(int signal = SIGINT) {
     if (main_loop != nullptr) {
         delete main_loop;
         main_loop = nullptr;
-        delete imgservice;
-        imgservice = nullptr;
     }
 }
 
@@ -383,16 +170,16 @@ int main(int argc, char **argv) {
         LOG_ERROR("failed to get max open fd limit");
         return ret;
     }
-    // if (rlim.rlim_max < MAX_OPEN_FD) {
-    //     rlim.rlim_max = MAX_OPEN_FD;
-    //     ret = setrlimit(RLIMIT_NOFILE, &rlim);
-    //     if (ret == -1) {
-    //         LOG_ERROR("failed to set max open fd to [soft: ` hard: `]",
-    //                   (long long int)rlim.rlim_cur,
-    //                   (long long int)rlim.rlim_max);
-    //         return ret;
-    //     }
-    // }
+    if (rlim.rlim_max < MAX_OPEN_FD) {
+        rlim.rlim_max = MAX_OPEN_FD;
+        ret = setrlimit(RLIMIT_NOFILE, &rlim);
+        if (ret == -1) {
+            LOG_ERROR("failed to set max open fd to [soft: ` hard: `]",
+                      (long long int)rlim.rlim_cur,
+                      (long long int)rlim.rlim_max);
+            return ret;
+        }
+    }
 
     /*
      * If this is a restart we need to prevent new nl cmds from being
@@ -444,5 +231,8 @@ int main(int argc, char **argv) {
 
     tcmulib_close(tcmulib_ctx);
     LOG_INFO("tcmulib closed");
+
+    // delete imgservice;
+
     return 0;
 }
