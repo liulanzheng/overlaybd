@@ -388,7 +388,6 @@ int ImageFile::initialize_prefetcher_v2(const std::string &uppermost_layer_dir) 
     }
 
     if (!conf.recordTracePath().empty()) {
-        LOG_INFO("Prefetch V2: recordTracePath = `", conf.recordTracePath());
         trace_path = conf.recordTracePath();
     }
     if (FileSystem::Prefetcher::detect_mode(trace_path) != FileSystem::Prefetcher::Mode::Disabled) {
