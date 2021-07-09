@@ -228,15 +228,18 @@ static void parse_args(int &argc, char **argv) {
     }
 }
 
-std::pair<std::string, std::string> reload_registry_auth(void *, const char *remote_path) {
+vector<Credential> reload_registry_auth(void *, const char *remote_path) {
     LOG_INFO("Acquire credential for ", VALUE(remote_path));
     std::string username, password;
+    std::vector<Credential> ret;
     int res = load_cred_from_file(cred_path, std::string(remote_path), username, password);
     if (res == 0) {
-        return std::make_pair(username, password);
+        Credential c(username, password);
+        ret.emplace_back(std::move(c));
+        return ret;
     }
     printf("reload registry credential failed, token not found.\n");
-    return std::make_pair("", "");
+    return ret;
 }
 
 int main(int argc, char **argv) {

@@ -28,8 +28,10 @@
 #include "overlaybd/fs/aligned-file.h"
 #include "overlaybd/fs/filesystem.h"
 #include "overlaybd/fs/localfs.h"
+#include "overlaybd/fs/registryfs/registryfs.h"
 #include "overlaybd/fs/lsmt/file.h"
 #include "overlaybd/fs/zfile/zfile.h"
+#include "overlaybd/base64.h"
 #include "config.h"
 #include "image_service.h"
 #include "image_file.h"
@@ -410,10 +412,34 @@ int ImageFile::init_image_file() {
         if (image_service.global_conf.prefetchConfig().traceDir().empty()) {
             LOG_ERROR_RETURN(0, -1, "Prefetch: empty option of traceDir");
         }
-        if (access(image_service.global_conf.prefetchConfig().traceDir().c_str(), F_OK) == 0) {
+        if (image_service.global_fs.localfs->access(image_service.global_conf.prefetchConfig().traceDir().c_str(), F_OK) == 0) {
             initialize_prefetcher_v1(uppermost_layer_dir);
         } else {
             initialize_prefetcher_v2(uppermost_layer_dir);
+        }
+    }
+    std::string auth_path = uppermost_layer_dir + "/.auth";
+    if (image_service.global_fs.localfs->access(auth_path.c_str(), F_OK) == 0) {
+        auto auth_file = image_service.global_fs.localfs->open(auth_path.c_str(), O_RDONLY);
+        char buffer[4096] = {0};
+        auto len = auth_file->read(buffer, 4096);
+        if (len > 0) {
+            auto token = base64_decode(std::string(buffer));
+            auto p = token.find(":");
+            if (p != std::string::npos) {
+                auto ctor = [&]() {
+                    return new Credential(token.substr(0, p), token.substr(p + 1));
+                };
+                auto nullctor = [&]() {
+                    return nullptr;
+                };
+                auto found = image_service.creds->acquire(conf.repoBlobUrl(), nullctor);
+                if (found != nullptr) {
+                    image_service.creds->release(conf.repoBlobUrl(), true);
+                }
+                image_service.creds->acquire(conf.repoBlobUrl(), ctor);
+                image_service.creds->release(conf.repoBlobUrl(), false);
+            }
         }
     }
 

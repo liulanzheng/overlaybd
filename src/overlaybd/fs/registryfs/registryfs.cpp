@@ -179,13 +179,15 @@ public:
         if (!scope.empty()) {
             token = m_scope_token.acquire(scope, [&]() -> estring * {
                 estring *token = new estring();
-                auto ret = m_callback(url);
-                if (!authenticate(authurl.c_str(), ret.first, ret.second, token, tmo.timeout())) {
-                    code = 401;
-                    delete token;
-                    return nullptr;
+                auto creds = m_callback(url);
+                for (auto cred : creds) {
+                    if (authenticate(authurl.c_str(), cred.username, cred.password, token, tmo.timeout())) {
+                        return token;
+                    }
                 }
-                return token;
+                code = 401;
+                delete token;
+                return nullptr;
             });
             if (token == nullptr)
                 LOG_ERROR_RETURN(0, false, "Failed to get token");

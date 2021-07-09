@@ -17,9 +17,12 @@
 #pragma once
 
 #include <string>
+#include <vector>
 #include "config.h"
 #include "overlaybd/fs/forwardfs.h"
+#include "overlaybd/fs/registryfs/registryfs.h"
 #include "overlaybd/string-keyed.h"
+#include "overlaybd/expirecontainer.h"
 
 namespace FileSystem {
     class RefObj;
@@ -86,7 +89,10 @@ struct ImageFile;
 
 class ImageService {
 public:
-    ImageService() {}
+    ImageService() {
+        uint64_t timeout = 24LL * 60 * 60 * 1000 * 1000;
+        creds = new ObjectCache<std::string, Credential*>(timeout);
+    }
     ~ImageService();
     int init();
     ImageFile *create_image_file(const char *config_path);
@@ -95,10 +101,11 @@ public:
     void clean_checksum();
     ImageConfigNS::GlobalConfig global_conf;
     struct GlobalFs global_fs;
+    ObjectCache<std::string, Credential*> *creds;
 
 private:
     int read_global_config_and_set();
-    std::pair<std::string, std::string> reload_auth(const char *remote_path);
+    std::vector<Credential> reload_auth(const char *remote_path);
     void set_result_file(std::string &filename, std::string &data);
     void __do_clean_checksum();
 };

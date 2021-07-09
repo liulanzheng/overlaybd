@@ -172,17 +172,29 @@ int ImageService::read_global_config_and_set() {
     return 0;
 }
 
-std::pair<std::string, std::string>
-ImageService::reload_auth(const char *remote_path) {
+std::vector<Credential> ImageService::reload_auth(const char *remote_path) {
     LOG_DEBUG("Acquire credential for ", VALUE(remote_path));
     std::string username, password;
-
-    int res = load_cred_from_file(global_conf.credentialFilePath(), std::string(remote_path), username, password);
+    std::vector<Credential> ret;
+    std::string path = remote_path;
+    int res = load_cred_from_file(global_conf.credentialFilePath(), path, username, password);
     if (res == 0) {
         LOG_INFO("auth found for `: `", remote_path, username);
-        return std::make_pair(username, password);
+        Credential c(username, password);
+        ret.emplace_back(std::move(c));
     }
-    return std::make_pair("", "");
+    auto ctor = [&]() { return nullptr; };
+    auto p = path.find("/sha256");
+    if (p != std::string::npos) {
+        auto cred = creds->acquire(path.substr(0, p), ctor);
+        if (cred != nullptr) {
+            LOG_INFO("auth found for `: `", remote_path, cred->username);
+            Credential c(cred->username, cred->password);
+            ret.emplace_back(std::move(c));
+            creds->release(path.substr(0, p), false);
+        }
+    }
+    return ret;
 }
 
 void ImageService::set_result_file(std::string &filename, std::string &data) {

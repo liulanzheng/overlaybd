@@ -17,8 +17,17 @@
 #pragma once
 #include <stdint.h>
 #include <string>
+#include <vector>
 #include "../../callback.h"
 #include "../virtual-file.h"
+
+struct Credential {
+    std::string username;
+    std::string password;
+    Credential(std::string username, std::string password):
+        username(username), password(password) {}
+};
+
 namespace FileSystem {
 
 // Docker registry always returns Token with expiry time >= 60 seconds.
@@ -44,7 +53,7 @@ public:
     }
 };
 
-using PasswordCB = Delegate<std::pair<std::string, std::string>, const char *>;
+using PasswordCB = Delegate<std::vector<Credential>, const char *>;
 
 extern "C" {
 IFileSystem *new_registryfs_with_credential_callback(PasswordCB callback,
