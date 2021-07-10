@@ -23,7 +23,7 @@ namespace FileSystem {
 
 class PrefetcherImplV2;
 
-class PrefetchFileV2 : public ForwardFile {
+class PrefetchFileV2 : public ForwardFile_Ownership {
 public:
     PrefetchFileV2(IFile* src_file, uint32_t layer_index, Prefetcher* prefetcher);
 
@@ -186,10 +186,10 @@ private:
         }
 
         auto close_trace_file = [&]() {
-          if (m_trace_file != nullptr) {
-              m_trace_file->close();
-              m_trace_file = nullptr;
-          }
+            if (m_trace_file != nullptr) {
+                m_trace_file->close();
+                m_trace_file = nullptr;
+            }
         };
         DEFER(close_trace_file());
 
@@ -292,7 +292,7 @@ LogBuffer& operator<<(LogBuffer& log, const PrefetcherImplV2::TraceFormat& f) {
 }
 
 PrefetchFileV2::PrefetchFileV2(IFile* src_file, uint32_t layer_index, Prefetcher* prefetcher) :
-    ForwardFile(src_file),
+    ForwardFile_Ownership(src_file, true),
     m_layer_index(layer_index),
     m_prefetcher((PrefetcherImplV2*) prefetcher) {
     if (m_prefetcher->get_mode() == PrefetcherImplV2::Mode::Replay) {

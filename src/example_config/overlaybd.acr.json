@@ -2,7 +2,7 @@
     "logLevel": 1,
     "registryCacheDir": "/var/lib/dadi/registryfs_cache",
     "registryCacheSizeGB": 10,
-    "credentialFilePath": "/var/lib/aliyun-acr/.acceleration-suite/config.json",
+    "credentialFilePath": "/root/.docker/config.json",
     "ioEngine": 1,
     "download": {
         "enable": true,
