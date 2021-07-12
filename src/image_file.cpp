@@ -386,7 +386,8 @@ int ImageFile::initialize_prefetcher_v2(const std::string &uppermost_layer_dir) 
     LOG_INFO("Prefetch V2: uppermost_layer_dir `", uppermost_layer_dir);
     std::string trace_path = uppermost_layer_dir + "/.trace";
     if (!conf.recordTracePath().empty() && access(trace_path.c_str(), F_OK) == 0) {
-        LOG_WARN("Trace already exists in layer. Ignore and record the new one");
+        LOG_WARN("Trace already exists in layer. Reset it to record the new one");
+        truncate(trace_path.c_str(), 0);
     }
 
     if (!conf.recordTracePath().empty()) {
@@ -407,11 +408,11 @@ int ImageFile::init_image_file() {
     std::string uppermost_layer_dir = lowers.back().dir();
 
     if (!image_service.global_conf.prefetchConfig().disable()) {
-        // 为FC做兼容：如果/opt/lsmd/prefetch目录存在，则使用prefetcher V1，否则使用prefetcher V2
         if (image_service.global_conf.prefetchConfig().traceDir().empty()) {
             LOG_ERROR_RETURN(0, -1, "Prefetch: empty option of traceDir");
         }
-        if (image_service.global_fs.localfs->access(image_service.global_conf.prefetchConfig().traceDir().c_str(), F_OK) == 0) {
+        // 为FC做兼容：如果/opt/lsmd/prefetch目录存在，则使用prefetcher V1，否则使用prefetcher V2
+        if (access(image_service.global_conf.prefetchConfig().traceDir().c_str(), F_OK) == 0) {
             initialize_prefetcher_v1(uppermost_layer_dir);
         } else {
             initialize_prefetcher_v2(uppermost_layer_dir);

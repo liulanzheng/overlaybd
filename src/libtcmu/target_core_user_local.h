@@ -77,7 +77,7 @@ struct tcmu_cmd_entry_hdr {
 
 static __inline__ enum tcmu_opcode tcmu_hdr_get_op(__u32 len_op)
 {
-	return len_op & TCMU_OP_MASK;
+	return (enum tcmu_opcode)(len_op & TCMU_OP_MASK);
 }
 
 static __inline__ void tcmu_hdr_set_op(__u32 *len_op, enum tcmu_opcode op)
