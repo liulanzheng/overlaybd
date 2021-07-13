@@ -24,6 +24,8 @@
 
 #define ALIGNMENT 4096
 
+photon::ThreadPool<32> threadpool;
+
 struct handle_args {
     struct ObdDevice *dev;
     struct tcmulib_cmd *cmd;

@@ -860,7 +860,12 @@ class LSMTSparseFile : public LSMTFile {
 public:
     static const off_t BASE_MOFFSET = HeaderTrailer::SPACE;
     uint64_t m_disk_quota = -1;
+    uint32_t lsmt_w_cnt = 0;
+    uint64_t lsmt_w_size = 0;
 
+    ~LSMTSparseFile() {
+         LOG_INFO("pwrite times: `, size: `M", lsmt_w_cnt, lsmt_w_size >> 20);
+    }
     virtual int close() override {
         return LSMTReadOnlyFile::close();
     }
@@ -895,6 +900,8 @@ public:
                 LOG_ERRNO_RETURN(0, -1, "write failed, file:`, ret:`, pos:`, count:`", m_files[m_rw_tag],
                                  ret, moffset, count);
             }
+            lsmt_w_size += ret;
+            lsmt_w_cnt++;
             LOG_DEBUG("insert segment: `", m);
             static_cast<IMemoryIndex0 *>(m_index)->insert(m);
         }

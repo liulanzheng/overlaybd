@@ -3,7 +3,9 @@
 #include "image_file.h"
 #include "overlaybd/event-loop.h"
 #include "libtcmu.h"
-#include "overlaybd/photon/thread-pool.h"
+
+
+
 
 class ObdDevice {
 public:
@@ -19,7 +21,6 @@ public:
 private:
     photon::join_handle *mem_reset_jh = nullptr;
     int fd;
-    photon::ThreadPool<32> threadpool;
     uint64_t last_io_time = 0;
     EventLoop *loop;
 
