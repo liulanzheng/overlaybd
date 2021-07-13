@@ -82,7 +82,11 @@ int load_cred_from_file(const std::string path, const std::string &remote_path,
         LOG_ERROR_RETURN(0, -1, "parse blob url failed: `", remote_path);
     }
 
-    for (auto &iter : cfg.auths().GetObject()) {
+    if (!cfg.HasMember("auths")) {
+        LOG_ERROR_RETURN(0, -1, "no auths found in credential file: `", remote_path);
+    }
+
+    for (auto &iter : cfg["auths"].GetObject()) {
         std::string addr = iter.name.GetString();
         LOG_DEBUG("cred addr: `", iter.name.GetString());
 
