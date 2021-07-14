@@ -81,23 +81,28 @@ public:
         if (m_mode == Mode::Record) {
             int lock_fd = open(m_lock_file_name.c_str(), O_RDWR | O_CREAT | O_TRUNC | O_EXCL, 0666);
             close(lock_fd);
-            photon::thread_create11(&PrefetcherImpl::detect_lock, this);
+            auto th = photon::thread_create11(&PrefetcherImpl::detect_lock, this);
+            m_detect_thread = photon::thread_enable_join(th);
         }
 
         // Reload if going to replay
         if (m_mode == Mode::Replay) {
-            m_replay_threads.resize(REPLAY_CONCURRENCY);
             reload(buf.st_size);
         }
     }
 
     ~PrefetcherImpl() {
-        if (m_mode == Mode::Record && !m_record_stopped) {
+        if (m_mode == Mode::Record) {
+            m_record_stopped = true;
+            if (m_detect_thread_interruptible) {
+                photon::thread_shutdown((photon::thread*) m_detect_thread);
+            }
+            photon::thread_join(m_detect_thread);
             dump();
         } else if (m_mode == Mode::Replay) {
             m_replay_stopped = true;
             for (auto th : m_replay_threads) {
-                photon::thread_interrupt((photon::thread*) th);
+                photon::thread_shutdown((photon::thread*) th);
                 photon::thread_join(th);
             }
         }
@@ -105,6 +110,7 @@ public:
             m_trace_file->close();
             m_trace_file = nullptr;
         }
+        LOG_INFO("Prefetcher: object destructed");
     }
 
     IFile* new_prefetch_file(IFile* src_file, uint32_t layer_index) override {
@@ -129,7 +135,8 @@ public:
         LOG_INFO("Prefetch: Replay ` records from ` layers", m_replay_queue.size(), m_src_files.size());
         for (int i = 0; i < REPLAY_CONCURRENCY; ++i) {
             auto th = photon::thread_create11(&PrefetcherImpl::replay_worker_thread, this);
-            m_replay_threads[i] = photon::thread_enable_join(th);
+            auto join_handle = photon::thread_enable_join(th);
+            m_replay_threads.push_back(join_handle);
         }
     }
 
@@ -196,15 +203,28 @@ private:
     string m_lock_file_name;
     string m_ok_file_name;
     vector<photon::join_handle*> m_replay_threads;
+    photon::join_handle* m_detect_thread = nullptr;
+    bool m_detect_thread_interruptible = false;
     bool m_replay_stopped;
     bool m_record_stopped;
     bool m_buffer_released;
 
     int dump() {
+        if (m_trace_file == nullptr) {
+            return 0;
+        }
+
         if (access(m_ok_file_name.c_str(), F_OK) != 0) {
             unlink(m_ok_file_name.c_str());
-            LOG_WARN("Prefetch: OK file exists before dump");
         }
+
+        auto close_trace_file = [&]() {
+            if (m_trace_file != nullptr) {
+                m_trace_file->close();
+                m_trace_file = nullptr;
+            }
+        };
+        DEFER(close_trace_file());
 
         TraceContent content;
         content.formats.assign(m_record_array);
@@ -232,10 +252,6 @@ private:
             LOG_ERRNO_RETURN(0, -1, "Prefetch: dump write content failed");
         }
 
-        if (m_trace_file != nullptr) {
-            m_trace_file->close();
-            m_trace_file = nullptr;
-        }
         unlink(m_lock_file_name.c_str());
         int ok_fd = open(m_ok_file_name.c_str(), O_RDWR | O_CREAT | O_TRUNC | O_EXCL, 0666);
         if (ok_fd < 0) {
@@ -287,8 +303,13 @@ private:
     }
 
     int detect_lock() {
-        while (true) {
-            photon::thread_sleep(1);
+        while (!m_record_stopped) {
+            m_detect_thread_interruptible = true;
+            int ret = photon::thread_sleep(1);
+            m_detect_thread_interruptible = false;
+            if (ret != 0) {
+                break;
+            }
             if (access(m_lock_file_name.c_str(), F_OK) != 0) {
                 m_record_stopped = true;
                 dump();
