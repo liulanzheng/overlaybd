@@ -38,8 +38,8 @@ void *thread_pool_cmd_handle(void *args) {
     return nullptr;
 }
 
-ObdDevice::ObdDevice(struct tcmu_device *tcmu_dev, ImageFile *file)
-    : tcmu_dev(tcmu_dev), file(file) {
+ObdDevice::ObdDevice(struct tcmu_device *tcmu_dev, ImageFile *file, uint32_t recycle_sec)
+    : tcmu_dev(tcmu_dev), file(file), recycle_sec(recycle_sec) {
     fd = tcmu_dev_get_fd(tcmu_dev);
     loop = new_event_loop({this, &ObdDevice::loop_wait_for_readable},
                           {this, &ObdDevice::loop_on_accept});
@@ -198,6 +198,7 @@ int ObdDevice::loop_on_accept(EventLoop *) {
     tcmulib_processing_start(tcmu_dev);
     while ((cmd = tcmulib_get_next_command(tcmu_dev, 0)) != NULL) {
         threadpool.thread_create(&thread_pool_cmd_handle, new handle_args{this, cmd});
+        // photon::thread_create(&thread_pool_cmd_handle, new handle_args{this, cmd});
     }
     return 0;
 }
@@ -219,10 +220,10 @@ void ObdDevice::reset_buffer() {
 
 void ObdDevice::mem_reset_thread() {
     while (true) {
-        photon::thread_sleep(60+10);
+        photon::thread_sleep(recycle_sec);
         if (file == nullptr)
             break; // exit
-        if (last_io_time > 0 && photon::now - last_io_time > 60 * 1000 * 1000) {
+        if (last_io_time > 0 && photon::now - last_io_time > recycle_sec * 1000 * 1000) {
             reset_buffer();
             last_io_time = 0;
         }

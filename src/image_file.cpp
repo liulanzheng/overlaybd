@@ -278,12 +278,20 @@ FileSystem::RefFile *ImageFile::open_lowers(std::vector<ImageConfigNS::LayerConf
         photon::thread_join(ths[i]);
     }
 
+    size_t raw_size = 0;
+    size_t img_size = 0;
     for (int i = 0; i < files.size(); i++) {
         if (files[i] == nullptr) {
             has_error = true;
             LOG_ERROR("layer index ` open failed", i);
             if (m_exception == "")
                 m_exception = "failed to open layer " + std::to_string(i);
+        }
+        if (i > 0) {
+            struct stat st;
+            files[i]->fstat(&st);
+            raw_size += st.st_size;
+            img_size += lowers[i].size();
         }
     }
     if (has_error)
@@ -299,7 +307,8 @@ FileSystem::RefFile *ImageFile::open_lowers(std::vector<ImageConfigNS::LayerConf
         m_prefetcher->replay();
     }
 
-    LOG_INFO("LSMT::open_files_ro(files, `) success", lowers.size());
+    LOG_INFO("LSMT::open_files_ro(files, `) success, raw size: `, img size: `",
+        lowers.size(), raw_size, img_size);
     return new_ref_file(ret, lowers_key);
 
 ERROR_EXIT:

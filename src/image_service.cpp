@@ -295,7 +295,7 @@ int ImageService::init() {
         LOG_INFO("create cache with size: ` GB",
                  global_conf.registryCacheSizeGB());
         global_fs.remote_fs = FileSystem::new_full_file_cached_fs(
-            checkedfs, registry_cache_fs, 1024 * 1024 /* refill unit 1M */,
+            checkedfs, registry_cache_fs, global_conf.registryCacheRefillKB() * 1024 /* refill unit 1M */,
             global_conf.registryCacheSizeGB() /*GB*/, 10000000,
             (uint64_t)1048576 * 1024, nullptr);
 

@@ -9,12 +9,13 @@
 
 class ObdDevice {
 public:
-    ObdDevice(struct tcmu_device *tcmu_dev, ImageFile *file);
+    ObdDevice(struct tcmu_device *tcmu_dev, ImageFile *file, uint32_t recycle_sec);
     ~ObdDevice();
 
     ImageFile *file = nullptr;
     uint32_t aio_pending_wakeups = 0;
     struct tcmu_device *tcmu_dev;
+    uint32_t recycle_sec = 60;
 
     void cmd_handler(struct tcmulib_cmd *cmd);
 

@@ -80,6 +80,7 @@ struct GlobalConfig : public ConfigUtils::Config {
     APPCFG_PARA(registryCacheDir, std::string, "/opt/overlaybd/registryfs_cache");
     APPCFG_PARA(credentialFilePath, std::string, "/opt/overlaybd/cred.json");
     APPCFG_PARA(registryCacheSizeGB, uint32_t, 4);
+    APPCFG_PARA(registryCacheRefillKB, uint32_t, 256);
     APPCFG_PARA(ioEngine, uint32_t, 0);
     APPCFG_PARA(logLevel, uint32_t, 1);
     APPCFG_PARA(logPath, std::string, "/var/log/overlaybd.log");
@@ -89,6 +90,7 @@ struct GlobalConfig : public ConfigUtils::Config {
     APPCFG_PARA(p2p, P2PConfig);
     APPCFG_PARA(checksumPath, std::string, "/var/lib/dadi/checksum");
     APPCFG_PARA(prefetchConfig, PrefetchConfig);
+    APPCFG_PARA(recycleSec, uint32_t, 60);
 };
 
 struct AuthConfig : public ConfigUtils::Config {

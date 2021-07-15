@@ -32,6 +32,9 @@
 
 #define MAX_OPEN_FD 1048576
 
+
+ImageService *imgservice = nullptr;
+
 class TCMULoop {
 protected:
     EventLoop *loop;
@@ -70,7 +73,6 @@ public:
 };
 
 TCMULoop *main_loop = nullptr;
-ImageService *imgservice = nullptr;
 
 static char *tcmu_get_path(struct tcmu_device *dev) {
     char *config = strchr(tcmu_dev_get_cfgstring(dev), '/');
@@ -98,7 +100,7 @@ static int dev_open(struct tcmu_device *dev) {
         LOG_ERROR_RETURN(0, -EPERM, "create image file failed");
     }
 
-    ObdDevice *odev = new ObdDevice(dev, file);
+    ObdDevice *odev = new ObdDevice(dev, file, imgservice->global_conf.recycleSec());
 
     tcmu_dev_set_private(dev, odev);
     tcmu_dev_set_block_size(dev, file->block_size);
