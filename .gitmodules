@@ -1,0 +1,3 @@
+[submodule "src/overlaybd/fs/ossfs/aliyun-oss-cpp-sdk"]
+	path = src/overlaybd/fs/ossfs/aliyun-oss-cpp-sdk
+	url = git@gitlab.alibaba-inc.com:dadi/aliyun-oss-cpp-sdk.git
