@@ -74,6 +74,18 @@ struct P2PConfig : public ConfigUtils::Config {
     APPCFG_PARA(timeout, int, 10);
 };
 
+
+struct OssConfig : public ConfigUtils::Config {
+    APPCFG_CLASS;
+
+    APPCFG_PARA(enable, bool, false);
+    APPCFG_PARA(domain, std::string, "");
+    APPCFG_PARA(bucket, std::string, "");
+    APPCFG_PARA(accessKey, std::string, "");
+    APPCFG_PARA(secretKey, std::string, "");
+    APPCFG_PARA(maxConn, int, 64);
+};
+
 struct GlobalConfig : public ConfigUtils::Config {
     APPCFG_CLASS
 
@@ -91,6 +103,7 @@ struct GlobalConfig : public ConfigUtils::Config {
     APPCFG_PARA(checksumPath, std::string, "/var/lib/dadi/checksum");
     APPCFG_PARA(prefetchConfig, PrefetchConfig);
     APPCFG_PARA(recycleSec, uint32_t, 60);
+    APPCFG_PARA(oss, OssConfig);
 };
 
 struct AuthConfig : public ConfigUtils::Config {
@@ -98,5 +111,6 @@ struct AuthConfig : public ConfigUtils::Config {
 
     APPCFG_PARA(auths, ConfigUtils::Document);
 };
+
 
 } // namespace ImageConfigNS

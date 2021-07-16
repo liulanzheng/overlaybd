@@ -23,6 +23,7 @@
 #include "overlaybd/photon/syncio/fd-events.h"
 #include "overlaybd/photon/syncio/signal.h"
 #include "overlaybd/photon/thread.h"
+#include "overlaybd/fs/ossfs/ossfs.h"
 #include "libtcmu.h"
 #include "libtcmu_common.h"
 #include <fcntl.h>
@@ -126,6 +127,7 @@ static void dev_close(struct tcmu_device *dev) {
         malloc_trim(128 * 1024);
         close_cnt = 0;
     }
+    imgservice->clean_checksum();
     LOG_INFO("dev closed");
     return;
 }
@@ -152,6 +154,9 @@ int main(int argc, char **argv) {
     DEFER(photon::sync_signal_fini());
     Net::libcurl_init();
     DEFER(Net::libcurl_fini());
+
+    if (FileSystem::ossfs_init())
+        LOG_ERROR_RETURN(-1, ENXIO, "Failed to initial ossfs");
 
     photon::block_all_signal();
     photon::sync_signal(SIGTERM, &sigint_handler);

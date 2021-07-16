@@ -26,7 +26,7 @@
 #include <atomic>
 #include <bitset>
 #include <sched.h>
-#include "../queue.h"
+#include "../../queue.h"
 #include "../thread.h"
 #include "../../utility.h"
 #include "../../alog.h"

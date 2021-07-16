@@ -287,7 +287,7 @@ FileSystem::RefFile *ImageFile::open_lowers(std::vector<ImageConfigNS::LayerConf
             if (m_exception == "")
                 m_exception = "failed to open layer " + std::to_string(i);
         }
-        if (i > 0) {
+        if (i > 0 && files[i] != nullptr) {
             struct stat st;
             files[i]->fstat(&st);
             raw_size += st.st_size;

@@ -26,8 +26,10 @@
 #include "overlaybd/fs/registryfs/registryfs.h"
 #include "overlaybd/fs/checkedfs/checkedfs.h"
 #include "overlaybd/fs/tar_file.h"
+#include "overlaybd/fs/ossfs/ossfs.h"
 #include "overlaybd/fs/zfile/zfile.h"
 #include "overlaybd/fs/p2pfs/p2pfs.h"
+#include "overlaybd/fs/async_filesystem.h"
 #include "overlaybd/net/socket.h"
 #include "overlaybd/net/socket.h"
 #include "overlaybd/photon/thread.h"
@@ -44,6 +46,52 @@
 const std::string DEFAULT_CONFIG_PATH = "/etc/overlaybd/overlaybd.json";
 const int LOG_SIZE_MB = 100;
 const int LOG_NUM = 3;
+static constexpr uint64_t SEC = 1UL * 1000 * 1000;
+
+static int oss_path_sub(void *, const char *path, std::string *ret) {
+    const char *filename = strstr(path, "sha256:");
+    if (filename == nullptr || strlen(filename) < 9 || strncmp(filename, "sha256:", 7) != 0)
+        return -1;
+    *ret = std::string("/docker/registry/v2/blobs/sha256/") +
+           std::string(filename + 7, filename + 9) + "/" + (filename + 7) + "/data";
+    return 0;
+}
+
+class PathSubstitutionFS : public FileSystem::ForwardFS_Ownership {
+public:
+    using Substitution = Callback<const char *, std::string *>;
+    Substitution subs;
+    ObjectCache<std::string, struct stat *> stat_cache;
+    PathSubstitutionFS(IFileSystem *fs, Substitution subs)
+        : ForwardFS_Ownership(fs, true), subs(subs), stat_cache(60UL * SEC) {
+    }
+    FileSystem::IFile *open(const char *path, int flags) override {
+        std::string subfn;
+        int ret = subs.fire(path, &subfn);
+        if (ret < 0) {
+            LOG_ERROR_RETURN(EINVAL, nullptr, "Path substitution failed ", VALUE(path));
+        }
+        LOG_INFO("Rename Open ", VALUE(path), VALUE(subfn));
+        return m_fs->open(subfn.c_str(), flags);
+    }
+    FileSystem::IFile *open(const char *path, int flags, mode_t mode) override {
+        std::string subfn;
+        int ret = subs.fire(path, &subfn);
+        if (ret < 0) {
+            LOG_ERROR_RETURN(EINVAL, nullptr, "Path substitution failed ", VALUE(path));
+        }
+        LOG_INFO("Rename Open ", VALUE(path), VALUE(subfn));
+        return m_fs->open(subfn.c_str(), flags, mode);
+    }
+    int stat(const char *path, struct stat *stat) override {
+        std::string subfn;
+        int ret = subs.fire(path, &subfn);
+        if (ret < 0) {
+            LOG_ERROR_RETURN(EINVAL, -1, "Path substitution failed ", VALUE(path));
+        }
+        return m_fs->stat(subfn.c_str(), stat);
+    }
+};
 
 struct ImageRef {
     std::vector<std::string> seg; // cr: seg_0, ns: seg_1, repo: seg_2
@@ -115,8 +163,7 @@ int load_cred_from_file(const std::string path, const std::string &remote_path,
             username = token.substr(0, p);
             password = token.substr(p + 1);
             return 0;
-        } else if (iter.value.HasMember("username") &&
-                   iter.value.HasMember("password")) {
+        } else if (iter.value.HasMember("username") && iter.value.HasMember("password")) {
             username = iter.value["username"].GetString();
             password = iter.value["password"].GetString();
             return 0;
@@ -140,16 +187,15 @@ bool ImageService::create_dir(const char *dirname) {
 
 int ImageService::read_global_config_and_set() {
     if (!global_conf.ParseJSON(DEFAULT_CONFIG_PATH)) {
-        LOG_ERROR_RETURN(0, -1, "error parse global config json: `",
-                         DEFAULT_CONFIG_PATH);
+        LOG_ERROR_RETURN(0, -1, "error parse global config json: `", DEFAULT_CONFIG_PATH);
     }
     uint32_t ioengine = global_conf.ioEngine();
     if (ioengine > 2) {
         LOG_ERROR_RETURN(0, -1, "unknown io_engine: `", ioengine);
     }
 
-    LOG_INFO("global config: cache_dir: `, cache_size_GB: `",
-             global_conf.registryCacheDir(), global_conf.registryCacheSizeGB());
+    LOG_INFO("global config: cache_dir: `, cache_size_GB: `", global_conf.registryCacheDir(),
+             global_conf.registryCacheSizeGB());
 
     if (global_conf.enableAudit()) {
         std::string auditPath = global_conf.auditPath();
@@ -157,7 +203,8 @@ int ImageService::read_global_config_and_set() {
             LOG_WARN("empty audit path, ignore audit");
         } else {
             LOG_INFO("set audit_path:`", global_conf.auditPath());
-            default_audit_logger.log_output = new_log_output_file(global_conf.auditPath().c_str(), LOG_SIZE_MB, LOG_NUM);
+            default_audit_logger.log_output =
+                new_log_output_file(global_conf.auditPath().c_str(), LOG_SIZE_MB, LOG_NUM);
         }
     } else {
         LOG_INFO("audit disabled");
@@ -207,8 +254,7 @@ void ImageService::set_result_file(std::string &filename, std::string &data) {
         return;
     }
 
-    auto file = FileSystem::open_localfile_adaptor(filename.c_str(),
-                                                   O_RDWR | O_CREAT | O_TRUNC);
+    auto file = FileSystem::open_localfile_adaptor(filename.c_str(), O_RDWR | O_CREAT | O_TRUNC);
     if (file == nullptr) {
         LOG_ERROR("failed to open result file", filename);
         return;
@@ -216,11 +262,10 @@ void ImageService::set_result_file(std::string &filename, std::string &data) {
     DEFER(delete file);
 
     if (file->write(data.c_str(), data.size()) != (ssize_t)data.size()) {
-        LOG_ERROR("write(`,`), path:`, `:`", data.c_str(), data.size(),
-                  filename.c_str(), errno, strerror(errno));
+        LOG_ERROR("write(`,`), path:`, `:`", data.c_str(), data.size(), filename.c_str(), errno,
+                  strerror(errno));
     }
-    LOG_DEBUG("write to result file: `, content: `", filename.c_str(),
-              data.c_str());
+    LOG_DEBUG("write to result file: `, content: `", filename.c_str(), data.c_str());
 }
 
 static std::string meta_name_trans(const char *fn) {
@@ -271,55 +316,63 @@ int ImageService::init() {
             }
         }
 
-        LOG_INFO("create registryfs with cafile:`", cafile);
-        auto registry_fs = FileSystem::new_registryfs_with_credential_callback(
-            {this, &ImageService::reload_auth}, cafile, 30UL * 1000000);
-        if (registry_fs == nullptr) {
-            LOG_ERROR_RETURN(0, -1, "create registryfs failed.");
+        FileSystem::IFileSystem *srcfs = nullptr;
+        if (global_conf.oss().enable()) {
+            LOG_INFO("create ossfs");
+            srcfs = new PathSubstitutionFS(
+                FileSystem::new_async_fs_adaptor(FileSystem::new_ossfs(
+                    global_conf.oss().domain().c_str(), global_conf.oss().bucket().c_str(),
+                    global_conf.oss().accessKey().c_str(), global_conf.oss().secretKey().c_str(),
+                    1UL * SEC, 5UL * SEC, global_conf.oss().maxConn())),
+                {nullptr, &oss_path_sub});
+        } else {
+            LOG_INFO("create registryfs with cafile:`", cafile);
+            srcfs = FileSystem::new_registryfs_with_credential_callback(
+                {this, &ImageService::reload_auth}, cafile, 30UL * 1000000);
+            if (srcfs == nullptr) {
+                LOG_ERROR_RETURN(0, -1, "create registryfs failed.");
+            }
         }
 
         auto metafs = FileSystem::new_localfs_adaptor(global_conf.checksumPath().c_str());
         LOG_INFO("create checkedfs, checksum path: `", global_conf.checksumPath());
-        auto checkedfs = FileSystem::new_checkedfs_adaptor_v1(registry_fs, metafs, meta_name_trans);
+        auto checkedfs = FileSystem::new_checkedfs_adaptor_v1(srcfs, metafs, meta_name_trans);
 
-        auto registry_cache_fs = FileSystem::new_localfs_adaptor(
-            global_conf.registryCacheDir().c_str());
+        auto registry_cache_fs =
+            FileSystem::new_localfs_adaptor(global_conf.registryCacheDir().c_str());
         if (registry_cache_fs == nullptr) {
-            delete registry_fs;
+            delete srcfs;
             delete checkedfs;
             LOG_ERROR_RETURN(0, -1, "new_localfs_adaptor for ` failed",
                              global_conf.registryCacheDir().c_str());
             return false;
         }
 
-        LOG_INFO("create cache with size: ` GB",
-                 global_conf.registryCacheSizeGB());
+        LOG_INFO("create cache with size: ` GB", global_conf.registryCacheSizeGB());
         global_fs.remote_fs = FileSystem::new_full_file_cached_fs(
-            checkedfs, registry_cache_fs, global_conf.registryCacheRefillKB() * 1024 /* refill unit 1M */,
-            global_conf.registryCacheSizeGB() /*GB*/, 10000000,
-            (uint64_t)1048576 * 1024, nullptr);
+            checkedfs, registry_cache_fs,
+            global_conf.registryCacheRefillKB() * 1024 /* refill unit */,
+            global_conf.registryCacheSizeGB(), 10000000, (uint64_t)1048576 * 1024, nullptr);
 
         if (global_fs.remote_fs == nullptr) {
-            delete registry_fs;
+            delete srcfs;
             delete checkedfs;
             delete registry_cache_fs;
-            LOG_ERROR_RETURN(0, -1,
-                             "create remotefs (registryfs + cache) failed.");
+            LOG_ERROR_RETURN(0, -1, "create remotefs (registryfs + cache) failed.");
         }
         global_fs.cachefs = registry_cache_fs;
-        global_fs.srcfs = registry_fs;
+        global_fs.srcfs = srcfs;
         global_fs.metafs = metafs;
         global_fs.checkedfs = checkedfs;
     }
 
-
     if (global_fs.p2pfs == nullptr && global_conf.p2p().enable()) {
         LOG_INFO("p2p agent: `:`", global_conf.p2p().ip(), global_conf.p2p().port());
-        auto p2pfs = FileSystem::new_p2pfs(FileSystem::NodeID(Net::EndPoint{
-                Net::IPAddr(global_conf.p2p().ip().c_str()),
-                (uint16_t)global_conf.p2p().port()
-            }), FileSystem::NodeID(), global_fs.metafs , nullptr, false, 200, 0,
-                nullptr, 1000UL * 1000, 1000000UL * global_conf.p2p().timeout());
+        auto p2pfs = FileSystem::new_p2pfs(
+            FileSystem::NodeID(Net::EndPoint{Net::IPAddr(global_conf.p2p().ip().c_str()),
+                                             (uint16_t)global_conf.p2p().port()}),
+            FileSystem::NodeID(), global_fs.metafs, nullptr, false, 200, 0, nullptr, 1000UL * 1000,
+            1000000UL * global_conf.p2p().timeout());
         // auto metafs = FileSystem::new_localfs_adaptor(global_conf.checksumPath().c_str());
         // LOG_INFO("create checkedfs, checksum path: `", global_conf.checksumPath());
         // auto checkedfs = FileSystem::new_checkedfs_adaptor_v1(p2pfs, metafs, meta_name_trans_v2);
@@ -373,7 +426,7 @@ void ImageService::__do_clean_checksum() {
             continue;
         }
         auto fullpath = global_conf.checksumPath() + "/" + basename;
-        auto touch = global_fs.localfs->access(fullpath.c_str() , F_OK);
+        auto touch = global_fs.localfs->access(fullpath.c_str(), F_OK);
         LOG_DEBUG("check ` is valid: `", basename, touch == 0);
         if (touch != 0) {
             LOG_INFO("remove invalid symbol link: `", fullpath);
@@ -388,7 +441,7 @@ void ImageService::clean_checksum() {
     photon::thread_create11(&ImageService::__do_clean_checksum, this);
 }
 
-bool ImageService::copy_checksum_file(const char* src, const char* dst_basename) {
+bool ImageService::copy_checksum_file(const char *src, const char *dst_basename) {
     std::string dst = global_conf.checksumPath() + "/" + dst_basename;
     auto touch = global_fs.localfs->access(dst.c_str(), F_OK);
     if (touch == 0) {
@@ -422,20 +475,20 @@ ImageService *create_image_service() {
 }
 
 namespace FileSystem {
-    RefFile* get_ref_file(const std::string &key) {
-        auto it = opened.find(key);
-        if (it != opened.end()) {
-            it->second->ref_count++;
-            LOG_INFO("return shared file `", key);
-            return new RefFile(it->second);
-        }
-        return nullptr;
+RefFile *get_ref_file(const std::string &key) {
+    auto it = opened.find(key);
+    if (it != opened.end()) {
+        it->second->ref_count++;
+        LOG_INFO("return shared file `", key);
+        return new RefFile(it->second);
     }
-
-    RefFile* new_ref_file(IFile *file, const std::string &key) {
-        auto found = get_ref_file(key);
-        if (found != nullptr)
-            return found;
-        return new RefFile(new RefObj(file, key));
-    }
+    return nullptr;
 }
+
+RefFile *new_ref_file(IFile *file, const std::string &key) {
+    auto found = get_ref_file(key);
+    if (found != nullptr)
+        return found;
+    return new RefFile(new RefObj(file, key));
+}
+} // namespace FileSystem

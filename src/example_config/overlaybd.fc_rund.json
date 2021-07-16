@@ -19,5 +19,13 @@
         "timeout": 10
     },
     "checksumPath": "/var/lib/dadi/checksum",
-    "recycleSec": 5
+    "recycleSec": 5,
+    "oss": {
+        "enable": false,
+        "domain": "",
+        "bucket": "",
+        "accessKey": "",
+        "secretKey": "",
+        "maxConn": 64
+    }
 }

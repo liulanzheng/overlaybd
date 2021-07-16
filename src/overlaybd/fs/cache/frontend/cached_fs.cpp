@@ -46,7 +46,7 @@ public:
         if (srcFs_) {
             srcFile = srcFs_->open(pathname, O_RDONLY);
             if (!srcFile)
-                LOG_ERRNO_RETURN(0, nullptr, "Open source file failed");
+                LOG_ERRNO_RETURN(0, nullptr, "Open source file failed, `", pathname);
         }
 
         auto cache_store = fileCachePool_->open(pathname, O_RDWR | O_CREAT, 0644);
