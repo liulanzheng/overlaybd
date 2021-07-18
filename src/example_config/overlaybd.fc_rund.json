@@ -6,7 +6,7 @@
     "credentialFilePath": "/var/lib/aliyun-acr/.acceleration-suite/config.json",
     "ioEngine": 1,
     "download": {
-        "enable": true,
+        "enable": false,
         "delay": 600,
         "maxMBps": 20
     },
