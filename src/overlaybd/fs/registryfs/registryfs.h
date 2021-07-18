@@ -28,6 +28,10 @@ struct Credential {
         username(username), password(password) {}
 };
 
+void set_registry_file_stat(std::string &url, size_t size);
+size_t get_registry_file_stat(std::string &url);
+void remove_registry_file_stat(std::string &url);
+
 namespace FileSystem {
 
 // Docker registry always returns Token with expiry time >= 60 seconds.

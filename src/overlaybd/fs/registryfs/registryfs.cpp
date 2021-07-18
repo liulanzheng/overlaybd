@@ -20,6 +20,7 @@
 #include <unistd.h>
 
 #include <sstream>
+#include <map>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -39,6 +40,22 @@
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
+
+
+std::map<std::string, size_t> registry_file_size_map;
+
+void set_registry_file_stat(std::string &url, size_t size) {
+    registry_file_size_map[url] = size;
+}
+size_t get_registry_file_stat(std::string &url) {
+    auto found = registry_file_size_map.find(url);
+    if (found == registry_file_size_map.end())
+        return 0;
+    return found->second;
+}
+void remove_registry_file_stat(std::string &url) {
+    registry_file_size_map.erase(url);
+}
 
 namespace FileSystem {
 
@@ -377,9 +394,10 @@ public:
             }
         }
         ssize_t ret = count;
-        for (auto &line : headers) {
-            LOG_DEBUG(VALUE(line.first), VALUE(line.second));
-        }
+        // for (auto &line : headers) {
+        //     LOG_DEBUG(VALUE(line.first), VALUE(line.second));
+        // }
+        // LOG_INFO("read registry: ", VALUE(m_url), VALUE(offset), VALUE(count));
         headers.try_get("content-length", ret);
         return ret;
     }
@@ -429,13 +447,20 @@ public:
 
     virtual int fstat(struct stat *buf) override {
         if (m_filesize == 0) {
-            auto meta = new ImageLayerMeta;
-            DEFER(delete meta);
-            int ret = getMeta(meta, m_timeout);
-            if (ret < 0) {
-                return -1;
+            auto size = get_registry_file_stat(m_url);
+            if (size > 0) {
+                m_filesize = size;
             }
-            m_filesize = meta->contentLength;
+            else {
+                LOG_WARN("size not found in map");
+                auto meta = new ImageLayerMeta;
+                DEFER(delete meta);
+                int ret = getMeta(meta, m_timeout);
+                if (ret < 0) {
+                    return -1;
+                }
+                m_filesize = meta->contentLength;
+            }
         }
         memset(buf, 0, sizeof(*buf));
         buf->st_mode = S_IFREG | S_IREAD;

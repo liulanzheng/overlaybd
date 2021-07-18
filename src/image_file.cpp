@@ -31,6 +31,8 @@
 #include "overlaybd/fs/registryfs/registryfs.h"
 #include "overlaybd/fs/lsmt/file.h"
 #include "overlaybd/fs/zfile/zfile.h"
+#include "overlaybd/photon/thread-pool.h"
+#include "overlaybd/photon/thread.h"
 #include "overlaybd/base64.h"
 #include "config.h"
 #include "image_service.h"
@@ -40,10 +42,17 @@
 #include "common_func.h"
 #include "prefetch.h"
 
-#define PARALLEL_LOAD_INDEX 32
+#define PARALLEL_OPEN 32
 const std::string COMMIT_FILE_NAME = ".commit";
 const std::string CHECKSUM_FILE_NAME = ".checksum_file";
 const std::string LAYER_OSS_URL_FILE_NAME  = ".oss_url";
+
+struct pread_args {
+    FileSystem::IFile *file;
+    size_t size;
+    off_t offset;
+};
+photon::ThreadPool<32> preload_threadpool;
 
 
 FileSystem::IFile *ImageFile::__open_ro_file(const std::string &path) {
@@ -87,6 +96,14 @@ FileSystem::IFile *ImageFile::__open_ro_file(const std::string &path) {
     return switch_file;
 }
 
+
+void *fetch_data(void *args) {
+    char buf[256*1024];
+    pread_args *obj = (pread_args *)args;
+    obj->file->pread(buf, obj->size, obj->offset);
+    delete obj;
+    return nullptr;
+}
 FileSystem::RefFile *ImageFile::__open_ro_dir_share(const std::string &dir,
                                 const std::string &digest, const uint64_t size) {
     auto found = FileSystem::get_ref_file(dir);
@@ -116,8 +133,12 @@ FileSystem::RefFile *ImageFile::__open_ro_dir_share(const std::string &dir,
     if (url[url.length() - 1] != '/')
         url += "/";
     url += digest;
-    LOG_INFO("open file from remotefs: `, size: `", url, size);
+    LOG_DEBUG("open file from remotefs: `, size: `", url, size);
     FileSystem::IFile *remote_file = nullptr;
+
+    set_registry_file_stat(url, size);
+    DEFER({remove_registry_file_stat(url);}); // ensure delete
+
     if (image_service.global_fs.p2pfs != nullptr) {
         remote_file = image_service.global_fs.p2pfs->open(url.c_str(), O_RDONLY);
         if (remote_file == nullptr) {
@@ -134,6 +155,20 @@ FileSystem::RefFile *ImageFile::__open_ro_dir_share(const std::string &dir,
             set_failed("failed to open remote file " + url);
         LOG_ERROR_RETURN(0, nullptr, "failed to open remote file `", url);
     }
+
+    //preload header trailer data
+    pread_args *args = new pread_args{remote_file, size<256*1024?size:256*1024, 0};
+    preload_threadpool.thread_create(&fetch_data, args);
+
+    if (size > 256 * 1024) {
+        pread_args *args = new pread_args{remote_file, 256*1024, size-256*1024};
+        preload_threadpool.thread_create(&fetch_data, args);
+    }
+    // photon::thread_create11(&fetch_data, remote_file, size<256*1024?size:256*1024, 0);
+    // if (size > 256 * 1024) {
+    //     photon::thread_create11(&fetch_data, remote_file, 256*1024, size - 256*1024);
+    // }
+
     FileSystem::IFile *switch_file = nullptr;
     if (conf.HasMember("download") && conf.download().enable() == 1) {
         FileSystem::IFile *src_file = image_service.global_fs.srcfs->open(url.c_str(), O_RDONLY);
@@ -262,13 +297,16 @@ FileSystem::RefFile *ImageFile::open_lowers(std::vector<ImageConfigNS::LayerConf
     if (found != nullptr)
         return found;
 
-    photon::join_handle *ths[PARALLEL_LOAD_INDEX];
+    photon::join_handle *ths[PARALLEL_OPEN];
     std::vector<FileSystem::IFile *> files;
     files.resize(lowers.size(), nullptr);
-    auto n = std::min(PARALLEL_LOAD_INDEX, (int)lowers.size());
-    LOG_DEBUG("create ` photon threads to open lowers", n);
+    auto n = std::min(PARALLEL_OPEN, (int)lowers.size());
+    LOG_INFO("create ` photon threads to open lowers", n);
     ParallelOpenTask tm(files, lowers.size(), lowers);
+    size_t raw_size = 0;
+    size_t img_size = 0;
     for (auto i = 0; i < n; ++i) {
+        // TODO: use thread pool
         ths[i] = photon::thread_enable_join(
             photon::thread_create11(&do_parallel_open_files, this, tm)
         );
@@ -277,9 +315,8 @@ FileSystem::RefFile *ImageFile::open_lowers(std::vector<ImageConfigNS::LayerConf
     for (int i = 0; i < n; i++) {
         photon::thread_join(ths[i]);
     }
+    LOG_INFO("open finished");
 
-    size_t raw_size = 0;
-    size_t img_size = 0;
     for (int i = 0; i < files.size(); i++) {
         if (files[i] == nullptr) {
             has_error = true;
