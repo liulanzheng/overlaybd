@@ -24,6 +24,10 @@
 #include <algorithm>
 #include <thread>
 #include <chrono>
+#ifdef HIGH_PRECISION_LOG_TIME
+#include "boost/date_time/posix_time/posix_time.hpp"
+#endif
+
 using namespace std;
 
 class BaseLogOutput : public ILogOutput {
@@ -411,15 +415,31 @@ static inline ALogInteger DEC_W2P0(uint64_t x) {
 LogBuffer &operator<<(LogBuffer &log, const Prologue &pro) {
 #ifdef LOG_BENCHMARK
     auto t = &alog_time;
-#else
-    auto t = alog_update_time();
-#endif
     log.printf(t->tm_year, '/');
     log.printf(DEC_W2P0(t->tm_mon), '/');
     log.printf(DEC_W2P0(t->tm_mday), ' ');
     log.printf(DEC_W2P0(t->tm_hour), ':');
     log.printf(DEC_W2P0(t->tm_min), ':');
     log.printf(DEC_W2P0(t->tm_sec));
+#elif defined(HIGH_PRECISION_LOG_TIME)
+    auto now = boost::posix_time::microsec_clock::local_time();
+    auto date = now.date();
+    auto td = now.time_of_day();
+    auto milliseconds =
+        td.total_milliseconds() - ((td.hours() * 3600 + td.minutes() * 60 + td.seconds()) * 1000);
+    char buf[64];
+    snprintf(buf, sizeof(buf), "%04d-%02d-%02d %02d:%02d:%02d.%03lld ", date.year(), date.month(),
+             date.day(), td.hours(), td.minutes(), td.seconds(), milliseconds);
+    log.printf(ALogString(buf, strlen(buf)));
+#else
+    auto t = alog_update_time();
+    log.printf(t->tm_year, '/');
+    log.printf(DEC_W2P0(t->tm_mon), '/');
+    log.printf(DEC_W2P0(t->tm_mday), ' ');
+    log.printf(DEC_W2P0(t->tm_hour), ':');
+    log.printf(DEC_W2P0(t->tm_min), ':');
+    log.printf(DEC_W2P0(t->tm_sec));
+#endif
 
     static const char levels[] =
         "|DEBUG|th=|INFO |th=|WARN |th=|ERROR|th=|FATAL|th=|METRC|th=|AUDIT|th=";
