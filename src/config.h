@@ -72,6 +72,7 @@ struct P2PConfig : public ConfigUtils::Config {
     APPCFG_PARA(ip, std::string, "127.0.0.1");
     APPCFG_PARA(port, int, 9877);
     APPCFG_PARA(timeout, int, 10);
+    APPCFG_PARA(auth, bool, false);
 };
 
 

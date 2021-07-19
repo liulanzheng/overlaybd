@@ -32,11 +32,12 @@ public:
 
     P2pAdaptorFile(IFileSystem *underlayfs, IFile *rfile, const char *pathname,
                    IFileSystem *backupfs)
-        : ForwardFile_Ownership(nullptr, true), m_underlayfs(underlayfs), m_rfile(rfile), m_pathname(pathname),
-          m_backupfs(backupfs){};
+        : ForwardFile_Ownership(nullptr, true), m_underlayfs(underlayfs), m_rfile(rfile),
+          m_pathname(pathname), m_backupfs(backupfs){};
 
     virtual ~P2pAdaptorFile() {
-        safe_delete(m_rfile);
+        if (m_rfile != nullptr)
+            safe_delete(m_rfile);
     }
 
     int reauth();
@@ -47,8 +48,10 @@ class P2pAdaptorFS : public ForwardFS {
 public:
     IFileSystem *m_dfs = nullptr; // down grade backup fs
     IFileSystem *m_rfs = nullptr; // registry fs
-    P2pAdaptorFS(IFileSystem *fs, IFileSystem *rfs, IFileSystem *dfs)
-        : ForwardFS(fs), m_rfs(rfs), m_dfs(dfs) {
+    bool m_auth = false;
+
+    P2pAdaptorFS(IFileSystem *fs, IFileSystem *rfs, IFileSystem *dfs, bool auth)
+        : ForwardFS(fs), m_rfs(rfs), m_dfs(dfs), m_auth(auth) {
     }
 
     virtual ~P2pAdaptorFS() {
@@ -56,17 +59,23 @@ public:
     }
 
     virtual IFile *open(const char *pathname, int flags) override {
-        auto file = m_rfs->open(pathname, flags);
-        if (file == nullptr) {
-            LOG_ERRNO_RETURN(0, nullptr, "open remote file failed: `", pathname);
+        if (m_auth) {
+            // local auth through registryfs
+            auto file = m_rfs->open(pathname, flags);
+            if (file == nullptr) {
+                LOG_ERRNO_RETURN(0, nullptr, "open remote file failed: `", pathname);
+            }
+            auto ret = new P2pAdaptorFile(m_fs, file, pathname, m_dfs);
+            auto auth_ret = ret->reauth();
+            if (auth_ret < 0) {
+                delete ret;
+                return nullptr;
+            }
+            return ret;
+        } else {
+            auto ret = new P2pAdaptorFile(m_fs, nullptr, pathname, m_dfs);
+            return ret;
         }
-        auto ret = new P2pAdaptorFile(m_fs, file, pathname, m_dfs);
-        auto auth_ret = ret->reauth();
-        if (auth_ret < 0) {
-            delete ret;
-            return nullptr;
-        }
-        return ret;
     }
 };
 

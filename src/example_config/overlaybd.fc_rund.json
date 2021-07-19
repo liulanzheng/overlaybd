@@ -16,7 +16,8 @@
         "enable": false,
         "ip": "127.0.0.1",
         "port": 9877,
-        "timeout": 10
+        "timeout": 10,
+        "auth": false
     },
     "checksumPath": "/var/lib/dadi/checksum",
     "recycleSec": 5,

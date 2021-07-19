@@ -31,13 +31,26 @@ int P2pAdaptorFile::reauth() {
 }
 
 ssize_t P2pAdaptorFile::pread(void *buf, size_t count, off_t offset) {
+    if (!m_file) {
+        std::string name = "/" + m_pathname;
+        if (m_pathname.substr(0,5) == "https")
+            name = "/"+m_pathname.substr(8);
+        else if (m_pathname.substr(0,4) == "http")
+            name = "/"+m_pathname.substr(7);
+        LOG_INFO("open p2p `", name.c_str());
+        m_file = m_underlayfs->open(name.c_str(), O_RDONLY);
+    }
+
     auto ret = ForwardFile::pread(buf, count, offset);
+
     if (ret < 0) {
-        if (errno == EPERM || errno == EACCES) {
-            // reauth
-            delete m_file;
-            reauth();
-            return ForwardFile::pread(buf, count, offset);
+        if (m_rfile != nullptr) {
+            if (errno == EPERM || errno == EACCES) {
+                // reauth
+                delete m_file;
+                reauth();
+                return ForwardFile::pread(buf, count, offset);
+            }
         }
 
         // downgrade

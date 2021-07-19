@@ -376,7 +376,7 @@ int ImageService::init() {
         // auto metafs = FileSystem::new_localfs_adaptor(global_conf.checksumPath().c_str());
         // LOG_INFO("create checkedfs, checksum path: `", global_conf.checksumPath());
         // auto checkedfs = FileSystem::new_checkedfs_adaptor_v1(p2pfs, metafs, meta_name_trans_v2);
-        global_fs.p2pfs = new FileSystem::P2pAdaptorFS(p2pfs, global_fs.srcfs, global_fs.remote_fs);
+        global_fs.p2pfs = new FileSystem::P2pAdaptorFS(p2pfs, global_fs.srcfs, global_fs.remote_fs, global_conf.p2p().auth());
         LOG_INFO("p2p fs created");
     }
 
