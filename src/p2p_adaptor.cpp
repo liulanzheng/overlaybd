@@ -54,7 +54,11 @@ ssize_t P2pAdaptorFile::pread(void *buf, size_t count, off_t offset) {
         }
 
         // downgrade
-        auto backup_file = m_backupfs->open(m_pathname.c_str(), O_RDONLY);
+        std::string name = m_pathname;
+        if (m_pathname.size() > 0 && m_pathname[0] == '/') {
+            name = m_pathname.substr(1);
+        }
+        auto backup_file = m_backupfs->open(name.c_str(), O_RDONLY);
         if (backup_file != nullptr) {
             auto bret = backup_file->pread(buf, count, offset);
             if (bret < 0) {
