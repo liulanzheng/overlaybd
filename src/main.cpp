@@ -208,6 +208,8 @@ int main(int argc, char **argv) {
         LOG_INFO("reset netlink done");
     }
 
+    tcmu_cfgfs_mod_param_set_u32("global_max_data_area_mb", 48);
+
     struct tcmulib_context *tcmulib_ctx;
     struct tcmulib_handler main_handler;
     main_handler.name = "Handler for overlaybd devices";

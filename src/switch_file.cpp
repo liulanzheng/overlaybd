@@ -46,6 +46,7 @@ public:
     bool running = false;
     std::string filepath;
     photon::join_handle *dl_thread_jh = nullptr;
+    bool downlaod_done = false;
 
     SwitchFile(IFile *source, bool local=false, const char* path=nullptr)
         : m_file(source), local_path(local) {
@@ -58,8 +59,8 @@ public:
 
     virtual ~SwitchFile() override {
         running = false;
-        if (dl_thread_jh != nullptr) {
-            photon::thread_shutdown((photon::thread*) dl_thread_jh);
+        if (!downlaod_done && dl_thread_jh != nullptr) {
+            photon::thread_interrupt((photon::thread*) dl_thread_jh, ECANCELED);
             photon::thread_join(dl_thread_jh);
         }
 
@@ -192,6 +193,7 @@ public:
             state = 1;
         }
         delete src_file;
+        downlaod_done = true;
     }
 
     void start_download(IFile *src_file, const std::string &digest, int delay_sec, int max_MB_ps, int max_try) {

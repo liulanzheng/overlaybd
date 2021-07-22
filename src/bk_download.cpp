@@ -38,7 +38,7 @@ namespace BKDL {
 
 bool downloading = false;
 
-std::string sha256sum(const char* fn) {
+std::string sha256sum(const char *fn, bool &running) {
     constexpr size_t BUFFERSIZE = 65536;
     int fd = open(fn, O_RDONLY | O_DIRECT);
     if (fd < 0) {
@@ -57,7 +57,7 @@ std::string sha256sum(const char* fn) {
     __attribute__((aligned(ALIGNMENT))) char buffer[65536];
     unsigned char sha[32];
     int recv = 0;
-    for (off_t offset = 0; offset < stat.st_size; offset += BUFFERSIZE) {
+    for (off_t offset = 0; running && offset < stat.st_size; offset += BUFFERSIZE) {
         recv = pread(fd, &buffer, BUFFERSIZE, offset);
         if (recv < 0) {
             LOG_ERROR("io error: `", fn);
@@ -68,11 +68,13 @@ std::string sha256sum(const char* fn) {
             return "";
         }
     }
+    if (!running) return "";
+
     SHA256_Final(sha, &ctx);
     char res[SHA256_DIGEST_LENGTH * 2];
     for (int i = 0; i < SHA256_DIGEST_LENGTH; i++)
         sprintf(res + (i * 2), "%02x", sha[i]);
-    return "sha256:" + std::string(res, SHA256_DIGEST_LENGTH*2);
+    return "sha256:" + std::string(res, SHA256_DIGEST_LENGTH * 2);
 }
 
 bool check_downloaded(const std::string &path) {
@@ -135,7 +137,8 @@ ssize_t filecopy(IFile *infile, IFile *outfile, size_t bs, int retry_limit, bool
     return offset;
 }
 
-bool download_done(const std::string &digest, std::string &downloaded_file, std::string &dst_file) {
+bool download_done(const std::string &digest, std::string &downloaded_file, std::string &dst_file,
+                   bool &running) {
     auto lfs = new_localfs_adaptor();
     if (!lfs) {
         LOG_ERROR("new_localfs_adaptor() return NULL");
@@ -146,12 +149,17 @@ bool download_done(const std::string &digest, std::string &downloaded_file, std:
     // verify sha256
     auto th = photon::CURRENT;
     std::string shares;
-    std::thread sha256_thread([&, th](){
-        shares = sha256sum(downloaded_file.c_str());
-        photon::safe_thread_interrupt(th, EINTR, 0);
+    bool done = false;
+    std::thread sha256_thread([&]() {
+        shares = sha256sum(downloaded_file.c_str(), running);
+        done = true;
     });
     sha256_thread.detach();
-    photon::thread_usleep(-1UL);
+    while (running && !done) {
+        photon::thread_usleep(100 * 1000);
+    }
+    if (!running) return false;
+
     if (shares != digest) {
         LOG_ERROR("verify checksum ` failed (expect: `, got: `)", downloaded_file, digest, shares);
         return false;
@@ -159,19 +167,20 @@ bool download_done(const std::string &digest, std::string &downloaded_file, std:
 
     int ret = lfs->rename(downloaded_file.c_str(), dst_file.c_str());
     if (ret != 0) {
-        LOG_ERROR_RETURN(0, false, "rename(`,`), `:`", downloaded_file, dst_file, errno, strerror(errno));
+        LOG_ERROR_RETURN(0, false, "rename(`,`), `:`", downloaded_file, dst_file, errno,
+                         strerror(errno));
     }
     LOG_INFO("download done. rename(`,`) success", downloaded_file, dst_file);
     return true;
 }
 
 bool download_blob(FileSystem::IFile *source_file, std::string &digest, std::string &dst_file,
-                        int delay, int max_MB_ps, int max_try, bool &running) {
+                   int delay, int max_MB_ps, int max_try, bool &running) {
     photon::thread_sleep(delay);
     if (!running)
         return false;
 
-    while (downloading) {
+    while (downloading && running) {
         photon::thread_sleep(1);
     }
     if (!running)
@@ -191,7 +200,7 @@ bool download_blob(FileSystem::IFile *source_file, std::string &digest, std::str
     }
     DEFER({
         if (max_MB_ps > 0)
-             delete src;
+            delete src;
     });
 
     auto dst = FileSystem::open_localfile_adaptor(dl_file_path.c_str(), O_RDWR | O_CREAT, 0644);
@@ -202,14 +211,15 @@ bool download_blob(FileSystem::IFile *source_file, std::string &digest, std::str
 
     while (max_try-- > 0 && running) {
         auto res = filecopy(src, dst, 1024UL * 1024, 1, running);
+        if (!running) return false;
         if (res < 0) {
             LOG_WARN("retry download for file `", dst_file);
             continue;
         }
-        if (download_done(digest, dl_file_path, dst_file)) {
+        if (download_done(digest, dl_file_path, dst_file, running)) {
             return true;
         }
-        LOG_WARN("retry download for file `", dst_file);
+        if (!running) return false;
     }
     return false;
 }

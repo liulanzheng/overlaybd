@@ -44,8 +44,8 @@ ObdDevice::ObdDevice(struct tcmu_device *tcmu_dev, ImageFile *file, uint32_t rec
     loop = new_event_loop({this, &ObdDevice::loop_wait_for_readable},
                           {this, &ObdDevice::loop_on_accept});
     loop->async_run();
-    mem_reset_jh =
-        photon::thread_enable_join(photon::thread_create11(&ObdDevice::mem_reset_thread, this));
+    // mem_reset_jh =
+    //     photon::thread_enable_join(photon::thread_create11(&ObdDevice::mem_reset_thread, this));
 }
 
 ObdDevice::~ObdDevice() {
@@ -53,8 +53,8 @@ ObdDevice::~ObdDevice() {
     file->close();
     delete file;
     file = nullptr;
-    photon::thread_shutdown((photon::thread *)mem_reset_jh);
-    photon::thread_join(mem_reset_jh);
+    // photon::thread_shutdown((photon::thread *)mem_reset_jh);
+    // photon::thread_join(mem_reset_jh);
 }
 
 void ObdDevice::cmd_handler(struct tcmulib_cmd *cmd) {
