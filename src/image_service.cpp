@@ -466,6 +466,7 @@ ImageService::~ImageService() {
     delete global_fs.srcfs;
     delete global_fs.localfs;
     delete global_fs.metafs;
+    delete creds;
 }
 
 ImageService *create_image_service() {

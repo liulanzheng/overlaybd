@@ -59,10 +59,10 @@ public:
 
     virtual ~SwitchFile() override {
         running = false;
-        if (!downlaod_done && dl_thread_jh != nullptr) {
+        if (!downlaod_done && dl_thread_jh != nullptr)
             photon::thread_interrupt((photon::thread*) dl_thread_jh, ECANCELED);
+        if (dl_thread_jh != nullptr)
             photon::thread_join(dl_thread_jh);
-        }
 
         if (m_file != nullptr) {
             safe_delete(m_file);
