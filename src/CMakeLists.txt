@@ -105,6 +105,7 @@ target_link_libraries(overlaybd-tcmu
     -laio
     -lpthread
     -static-libgcc
+    -static-libstdc++
 )
 
 

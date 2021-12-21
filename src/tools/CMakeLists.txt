@@ -11,6 +11,7 @@ target_link_libraries(overlaybd-commit
     -lresolv
     -lpthread
     -static-libgcc
+    -static-libstdc++
 )
 
 add_executable(overlaybd-create overlaybd-create.cpp)
@@ -26,6 +27,7 @@ target_link_libraries(overlaybd-create
     -lresolv
     -lpthread
     -static-libgcc
+    -static-libstdc++
 )
 
 set(CURL_STATIC ON)
@@ -58,6 +60,7 @@ target_link_libraries(overlaybd-info
     -lpthread
     -ldl
     -static-libgcc
+    -static-libstdc++
 )
 
 add_executable(overlaybd-zfile overlaybd-zfile.cpp)
@@ -73,6 +76,7 @@ target_link_libraries(overlaybd-zfile
     -lresolv
     -lpthread
     -static-libgcc
+    -static-libstdc++
 )
 
 install(TARGETS
