@@ -4,7 +4,6 @@ find_package(OpenSSL REQUIRED)
 add_executable(overlaybd-commit overlaybd-commit.cpp)
 target_link_libraries(overlaybd-commit
     -Wl,--whole-archive
-    base_lib
     fs_lib
     photon_lib
     -Wl,--no-whole-archive
@@ -13,7 +12,6 @@ target_link_libraries(overlaybd-commit
 add_executable(overlaybd-create overlaybd-create.cpp)
 target_link_libraries(overlaybd-create
     -Wl,--whole-archive
-    base_lib
     fs_lib
     photon_lib
     -Wl,--no-whole-archive
@@ -27,10 +25,8 @@ target_include_directories(overlaybd-info PUBLIC
 )
 target_link_libraries(overlaybd-info
     -Wl,--whole-archive
-    base_lib
     fs_lib
     photon_lib
-    net_lib
     image_lib
     ${CURL_LIBRARY}
     ${OPENSSL_SSL_LIBRARY}
@@ -41,7 +37,6 @@ target_link_libraries(overlaybd-info
 add_executable(overlaybd-zfile overlaybd-zfile.cpp)
 target_link_libraries(overlaybd-zfile
     -Wl,--whole-archive
-    base_lib
     fs_lib
     photon_lib
     -Wl,--no-whole-archive

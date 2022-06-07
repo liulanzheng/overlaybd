@@ -1,5 +1,5 @@
 #include "export.h"
-#include "thread.h"
+#include <photon/thread/thread.h>
 
 int photon_thread_usleep(uint64_t useconds) {
     return photon::thread_usleep(useconds);

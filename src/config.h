@@ -17,7 +17,7 @@
 
 #include <string>
 #include <vector>
-#include "overlaybd/config_util.h"
+#include "config_util.h"
 
 namespace ImageConfigNS {
 const int MAX_LAYER_CNT = 256;

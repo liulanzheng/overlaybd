@@ -1,7 +1,7 @@
 find_package(CURL REQUIRED)
 find_package(OpenSSL REQUIRED)
-find_package(aio REQUIRED)
-find_package(nl)
+find_package(nl REQUIRED)
+find_package(photon REQUIRED)
 find_package(PkgConfig)
 pkg_check_modules(GLIB REQUIRED gio-unix-2.0)
 
@@ -30,6 +30,45 @@ FetchContent_GetProperties(tcmu_runner)
 if (NOT tcmu_runner_POPULATED)
   FetchContent_Populate(tcmu_runner)
 endif()
+
+file(
+  GLOB PHOTON_FS_SRC
+  ${photon_SOURCE_DIR}/fs/localfs.cpp
+  ${photon_SOURCE_DIR}/fs/virtual-file.cpp
+  ${photon_SOURCE_DIR}/fs/subfs.cpp
+  ${photon_SOURCE_DIR}/fs/throttled-file.cpp
+  ${photon_SOURCE_DIR}/fs/aligned-file.cpp
+  ${photon_SOURCE_DIR}/fs/path.cpp
+)
+file(
+  GLOB PHOTON_IO_SRC
+  ${photon_SOURCE_DIR}/io/epoll.cpp
+  ${photon_SOURCE_DIR}/io/signalfd.cpp
+)
+
+file(
+  GLOB PHOTON_NET_SRC
+  ${photon_SOURCE_DIR}/net/curl.cpp
+)
+
+file(
+  GLOB PHOTON_SRC
+  ${photon_SOURCE_DIR}/photon.cpp
+  ${photon_SOURCE_DIR}/common/*.cpp
+  ${photon_SOURCE_DIR}/common/checksum/*.cpp
+  ${photon_SOURCE_DIR}/thread/*.cpp
+  ${photon_SOURCE_DIR}/thread/switch_context_${ARCH}.s
+)
+add_library(photon_lib STATIC
+  ${PHOTON_SRC}
+  ${PHOTON_FS_SRC}
+  ${PHOTON_IO_SRC}
+  ${PHOTON_NET_SRC}
+)
+target_compile_options(photon_lib PUBLIC -msse4.2 -mcrc32)
+target_include_directories(photon_lib PUBLIC
+    ${PHOTON_INCLUDE_DIR}
+)
 
 add_subdirectory(overlaybd)
 
@@ -64,19 +103,19 @@ target_include_directories(image_lib PUBLIC
     ${CURL_INCLUDE_DIRS}
     ${OPENSSL_INCLUDE_DIR}
     ${rapidjson_SOURCE_DIR}/include
+    ${PHOTON_INCLUDE_DIR}
 )
 
 add_executable(overlaybd-tcmu main.cpp)
-target_include_directories(overlaybd-tcmu
-  PUBLIC ${tcmu_runner_SOURCE_DIR}
+target_include_directories(overlaybd-tcmu PUBLIC
+  ${tcmu_runner_SOURCE_DIR}
+  ${PHOTON_INCLUDE_DIR}
 )
 target_link_libraries(overlaybd-tcmu
     -Wl,--whole-archive
-    base_lib
     image_lib
     fs_lib
     photon_lib
-    net_lib
     tcmu_lib
     ${CURL_LIBRARIES}
     ${OPENSSL_SSL_LIBRARY}
@@ -89,4 +128,4 @@ install(FILES example_config/overlaybd-tcmu.service DESTINATION /opt/overlaybd/)
 install(FILES example_config/overlaybd.json DESTINATION /etc/overlaybd/)
 install(FILES example_config/cred.json DESTINATION /opt/overlaybd/)
 
-add_subdirectory(tools)
+#add_subdirectory(tools)

@@ -283,7 +283,7 @@ int main(int argc, char **argv) {
         auto prefix = url.substr(0, p);
         auto suburl = url.substr(p);
         LOG_INFO("create registryfs with cafile:`", cafile);
-        auto registryfs = FileSystem::new_registryfs_with_credential_callback(
+        auto registryfs = new_registryfs_with_credential_callback(
             {nullptr, &reload_registry_auth}, cafile, 30UL * 1000000);
         if (registryfs == nullptr) {
             printf("connect to registry failed.\n");
