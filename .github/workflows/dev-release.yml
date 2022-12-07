@@ -3,7 +3,7 @@ name: dev-release
 on:
   push:
     branches:
-    - main
+    - json-b
 
 env:
   BUILD_TYPE: Release
