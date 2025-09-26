@@ -22,6 +22,9 @@
 #include <photon/common/alog.h>
 #include <photon/fs/filesystem.h>
 #include <photon/common/utility.h>
+#ifdef __AVX512F__
+#include <immintrin.h>
+#endif
 using namespace std;
 
 namespace LSMT {
@@ -54,6 +57,109 @@ static inline size_t copy_n(IT begin, IT end, uint64_t end_offset, SegmentMappin
 
 static bool verify_mapping_order(const SegmentMapping *pmappings, size_t n);
 
+#ifdef __AVX512F__
+
+const uint32_t B = 8;
+const uint32_t MAX_LEVEL = 10;
+const uint32_t NODES_PER_LEVEL[] = {8, 72, 648, 5832, 52488, 472392, 4251528, 38263752, 344373768, 3099363912};
+const uint32_t LEVEL_START_ID[] =  {0,  8,  80,  728,  6560,  59048,  531440,  4782968,  43046720,  387420488};
+
+class LinearizedBptree {
+public:
+    uint64_t N;
+    uint64_t *node = nullptr;
+    int32_t DEPTH = -1;
+
+    LinearizedBptree() {
+    }
+
+    ~LinearizedBptree() {
+        free(node);
+    }
+
+    int build(const SegmentMapping* pbegin, const SegmentMapping* pend) {
+        if (pbegin == pend) {
+            LOG_ERROR_RETURN(EINVAL, -1, "linearized bptree not used: empty mapping");
+        }
+        if (pbegin->offset != 0) {
+            // In a real file system, mapping offset starts from 0. skip for some ut.
+            LOG_ERROR_RETURN(EINVAL, -1, "linearized bptree not used: invalid start offset");
+        }
+        size_t mapping_size = pend - pbegin;
+        for (uint32_t i = 0; i < MAX_LEVEL; i++)
+            if (NODES_PER_LEVEL[i] >= mapping_size) {
+                DEPTH = i+1;
+                break;
+            }
+        if (DEPTH == -1) {
+            LOG_ERROR_RETURN(EINVAL, -1, "linearized bptree not used: too many mappings");
+        }
+
+        N = (LEVEL_START_ID[DEPTH-1] + mapping_size + B - 1) / B * B;
+        LOG_INFO("building Linearized B+tree ", VALUE(DEPTH), VALUE(mapping_size), VALUE(N));
+        auto ret = posix_memalign((void**)&node, 64, N*sizeof(uint64_t));
+        if (ret != 0) {
+            LOG_ERRNO_RETURN(ENOBUFS, -1, "linearized bptree not used: failed to alloc memory");
+        }
+
+        uint32_t leaf_start = LEVEL_START_ID[DEPTH - 1];
+        uint32_t leaf_size = NODES_PER_LEVEL[DEPTH - 1];
+
+        uint32_t p = leaf_start;
+
+        for (auto mp = pbegin; mp < pend; mp++, p++) {
+            node[p] = mp->offset;
+        }
+        for (; p < N; p++)
+            node[p] = -1;
+        
+        auto G = B;
+        for (auto level = DEPTH-1; level > 0; level--) {
+            auto pos = LEVEL_START_ID[level - 1];
+            for (uint32_t i = 0; i < leaf_size; i += G * (B + 1)) {
+                for (uint32_t j = 1; j <= B; j++) {
+                    uint32_t lower_id = leaf_start + i + G * j;
+                    node[pos++] = (lower_id < N) ? node[lower_id] : -1;
+                }
+            }
+            G *= (B + 1);
+        }
+        LOG_INFO("building Linearized B+tree done");
+        return 0;
+    }
+
+    uint32_t branchfree_inner_search(const uint64_t *base, uint64_t x) const {
+        __m512i vx = _mm512_set1_epi64(x);
+        __m512i data = _mm512_load_si512(base);
+        uint8_t mask = _mm512_cmp_epu64_mask(vx, data, _MM_CMPINT_GE);
+        return __builtin_popcount(mask);
+    }
+
+    __attribute__((always_inline)) uint32_t search(const uint64_t x) const {
+        uint32_t res = 0;
+#pragma GCC unroll 20
+        for (int i = DEPTH; i > 1; --i) {
+            uint32_t c = branchfree_inner_search(node + res, x);
+            res = (B+1)*res + (c+1)*B;
+        }
+        res += branchfree_inner_search(node + res, x);
+        res = res - 1 - LEVEL_START_ID[DEPTH-1];
+        return res;
+    }
+};
+
+#else
+class LinearizedBptree {
+public: 
+    int build(const SegmentMapping* pbegin, const SegmentMapping* pend) {
+        return -1;
+    }
+    uint32_t search(const uint64_t x) const {
+        return -1;
+    }
+};
+#endif
+
 class Index : public IMemoryIndex {
 public:
     bool ownership = false;
@@ -62,6 +168,7 @@ public:
     const SegmentMapping *pend = nullptr;
     uint64_t alloc_blk = 0;
     uint64_t virtual_size = 0;
+    LinearizedBptree *lbt = nullptr;
 
     inline void get_alloc_blks() {
         for (auto m : mapping) {
@@ -72,6 +179,7 @@ public:
         if (ownership) {
             delete[] pbegin;
         }
+        safe_delete(lbt);
     }
     Index(const SegmentMapping *pmappings = nullptr, size_t n = 0, bool ownership = true,
           uint64_t vsize = 0)
@@ -82,6 +190,10 @@ public:
         }
         pbegin = pmappings;
         pend = pbegin + n;
+        lbt = new LinearizedBptree();
+        if (lbt->build(pbegin, pend) < 0) {
+            safe_delete(lbt);
+        }
     }
     Index(vector<SegmentMapping> &&m, uint64_t vsize = 0)
         : mapping(std::move(m)), virtual_size(vsize) {
@@ -91,6 +203,10 @@ public:
             get_alloc_blks();
         } else
             pbegin = pend = nullptr;
+        lbt = new LinearizedBptree();
+        if (lbt->build(pbegin, pend) < 0) {
+            safe_delete(lbt);
+        }
     }
 
     virtual uint64_t block_count() const override {
@@ -120,7 +236,15 @@ public:
     virtual size_t lookup(Segment s, /* OUT */ SegmentMapping *pm, size_t n) const override {
         if (s.length == 0)
             return 0;
-        auto lb = std::lower_bound(pbegin, pend, s);
+        const SegmentMapping *lb;
+        if (lbt) {
+            lb = pbegin + lbt->search(s.offset);
+            if (lb->end() <= s.offset)
+                lb++;
+        } else {
+            lb = std::lower_bound(pbegin, pend, s);
+        }
+
         auto m = copy_n(lb, pend, s.end(), pm, n);
         trim_edge_mappings(pm, m, s);
         return m;
