@@ -17,6 +17,9 @@
 #include "image_file.h"
 #include "image_service.h"
 #include "tools/comm_func.h"
+#include "libtcmu/libtcmu.h"
+#include "libtcmu/libtcmu_common.h"
+
 #include <photon/common/alog.h>
 #include <photon/common/event-loop.h>
 #include <photon/fs/filesystem.h>
@@ -27,8 +30,6 @@
 #include <photon/thread/thread.h>
 #include <photon/thread/thread-pool.h>
 
-#include <libtcmu.h>
-#include <libtcmu_common.h>
 #include <scsi.h>
 #include <scsi_defs.h>
 #include <fcntl.h>

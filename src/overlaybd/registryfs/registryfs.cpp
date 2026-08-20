@@ -43,6 +43,7 @@
 #include <rapidjson/writer.h>
 
 using namespace photon::fs;
+using photon::Timeout;
 
 static const estring kDockerRegistryAuthChallengeKeyValuePrefix = "www-authenticate";
 static const estring kAuthHeaderKey = "Authorization";
@@ -426,7 +427,7 @@ public:
 
         if (code != 200 && code != 206) {
             ERRNO eno;
-            if (timeout.expire() < photon::now) {
+            if (timeout.expiration() < photon::now) {
                 LOG_ERROR_RETURN(ETIMEDOUT, -1, "timed out in preadv ", VALUE(m_url),
                                  VALUE(offset));
             }
@@ -464,7 +465,7 @@ public:
     again:
         auto code = m_fs->GET(m_url.c_str(), &headers, -1, -1, nullptr, tmo.timeout());
         if (code != 200 && code != 206) {
-            if (tmo.expire() < photon::now)
+            if (tmo.expiration() < photon::now)
                 LOG_ERROR_RETURN(ETIMEDOUT, -1, "Get meta timedout");
             if (retry--)
                 goto again;
