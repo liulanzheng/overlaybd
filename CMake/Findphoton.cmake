@@ -48,6 +48,10 @@ if(TARGET ocf_lib AND NOT TARGET photon_cache_lib)
     "$<TARGET_FILE:ocf_lib>"
     "-Wl,--end-group"
   )
+  # Photon users do not all depend on OverlayBD's gzip-cache target.  Export
+  # the OCF rescan group from photon_static itself so tools such as
+  # overlaybd-commit receive the required OCF environment implementation.
+  target_link_libraries(photon_static INTERFACE photon_cache_lib)
 endif()
 
 if (BUILD_CURL_FROM_SOURCE)
