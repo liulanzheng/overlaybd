@@ -216,7 +216,7 @@ Default configure file `overlaybd.json` is installed to `/etc/overlaybd/`.
 | exporterConfig.port           | port for http server to show metrics.                                                       |
 | exporterConfig.updateInterval | Time interval to update metrics in microseconds.                                            |
 | enableAudit         | Enable audit or not.                                                                                  |
-| enableThread        | Enable overlaybd device run in seprate thread or not. Note `cacheType` should be `ocf`. `false` is default. |
+| enableThread        | Enable overlaybd device run in seprate thread or not          |
 | auditPath           | The path for audit file, `/var/log/overlaybd-audit.log` is the default value.                         |
 | registryFsVersion   | registry client version, 'v1' libcurl based, 'v2' is photon http based. 'v2' is the default value.    |
 | prefetchConfig.concurrency    | Prefetch concurrency for reloading trace, `16` is default                                   |
