@@ -13,6 +13,7 @@
         "path": "/opt/overlaybd/cred.json"
     },
     "ioEngine": 0,
+    "enableThread": true,
     "download": {
         "enable": true,
         "delay": 600,
