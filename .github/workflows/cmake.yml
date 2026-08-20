@@ -43,7 +43,7 @@ jobs:
       working-directory: ${{github.workspace}}/build
       run: |
         git submodule update --init
-        cmake $GITHUB_WORKSPACE -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DBUILD_TESTING=1 -DENABLE_DSA=1 -DENABLE_ISAL=1
+        cmake $GITHUB_WORKSPACE -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DBUILD_TESTING=1 -DENABLE_THREAD=1 -DENABLE_DSA=1 -DENABLE_ISAL=1
 
     - name: Build
       working-directory: ${{github.workspace}}/build
