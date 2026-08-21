@@ -17,6 +17,9 @@
 #include "image_file.h"
 #include "image_service.h"
 #include "tools/comm_func.h"
+#include "libtcmu/libtcmu.h"
+#include "libtcmu/libtcmu_common.h"
+
 #include <photon/common/alog.h>
 #include <photon/common/event-loop.h>
 #include <photon/fs/filesystem.h>
@@ -25,10 +28,8 @@
 #include <photon/io/signal.h>
 #include <photon/photon.h>
 #include <photon/thread/thread.h>
-#include <photon/thread/thread-pool.h>
+#include <photon/thread/workerpool.h>
 
-#include <libtcmu.h>
-#include <libtcmu_common.h>
 #include <scsi.h>
 #include <scsi_defs.h>
 #include <fcntl.h>
@@ -36,6 +37,7 @@
 #include <sys/resource.h>
 #include <sys/prctl.h>
 #include <linux/netlink.h>
+#include <memory>
 #include <string>
 
 class TCMUDevLoop;
@@ -47,8 +49,7 @@ struct obd_dev {
     TCMUDevLoop *loop;
     uint32_t aio_pending_wakeups;
     uint32_t inflight;
-    std::thread *work;
-    photon::semaphore start, end;
+    photon::semaphore start, end, finished;
     std::string dev_id;
 };
 
@@ -60,6 +61,7 @@ struct handle_args {
 class TCMULoop;
 TCMULoop *main_loop = nullptr;
 ImageService *imgservice = nullptr;
+photon::WorkPool *device_work_pool = nullptr;
 
 class TCMULoop {
 protected:
@@ -291,7 +293,6 @@ protected:
     struct tcmu_device *dev;
     EventLoop *loop;
     int fd;
-    photon::ThreadPool<32> threadpool;
 
     int wait_for_readable(EventLoop *) {
         auto ret = photon::wait_for_fd_readable(fd);
@@ -310,7 +311,7 @@ protected:
         tcmulib_processing_start(dev);
         while ((cmd = tcmulib_get_next_command(dev, 0)) != NULL) {
             odev->inflight++;
-            threadpool.thread_create(&handle, new handle_args{dev, cmd});
+            photon::thread_create(&handle, new handle_args{dev, cmd});
         }
         return 0;
     }
@@ -373,27 +374,19 @@ static int dev_open(struct tcmu_device *dev) {
     tcmu_dev_set_write_cache_enabled(dev, false);
     tcmu_dev_set_write_protect_enabled(dev, file->read_only);
 
-    if (imgservice->global_conf.enableThread()) {
-        auto obd_th = [](obd_dev *odev, struct tcmu_device *dev) {
-            photon::init(photon::INIT_EVENT_EPOLL, photon::INIT_IO_LIBCURL);
-            DEFER(photon::fini());
+    device_work_pool->async_call(new auto([odev, dev] {
+        DEFER(odev->finished.signal(1));
 
-            odev->loop = new TCMUDevLoop(dev);
-            odev->loop->run();
-            LOG_INFO("obd device running");
-            odev->start.signal(1);
-
-            odev->end.wait(1);
-            delete odev->loop;
-            LOG_INFO("obd device exit");
-        };
-
-        odev->work = new std::thread(obd_th, odev, dev);
-        odev->start.wait(1);
-    } else {
         odev->loop = new TCMUDevLoop(dev);
         odev->loop->run();
-    }
+        LOG_INFO("obd device running");
+        odev->start.signal(1);
+
+        odev->end.wait(1);
+        delete odev->loop;
+        LOG_INFO("obd device exit");
+    }));
+    odev->start.wait(1);
 
     struct timeval end;
     gettimeofday(&end, NULL);
@@ -406,15 +399,8 @@ static int dev_open(struct tcmu_device *dev) {
 static int close_cnt = 0;
 static void dev_close(struct tcmu_device *dev) {
     obd_dev *odev = (obd_dev *)tcmu_dev_get_private(dev);
-    if (imgservice->global_conf.enableThread()) {
-        odev->end.signal(1);
-        if (odev->work->joinable()) {
-            odev->work->join();
-        }
-        delete odev->work;
-    } else {
-        delete odev->loop;
-    }
+    odev->end.signal(1);
+    odev->finished.wait(1);
     delete odev->file;
     delete odev;
     LOG_INFO("dev closed `", tcmu_get_path(dev));
@@ -438,7 +424,10 @@ int main(int argc, char **argv) {
     mallopt(M_TRIM_THRESHOLD, 128 * 1024);
     prctl(PR_SET_THP_DISABLE, 1);
 
-    photon::init(photon::INIT_EVENT_DEFAULT, photon::INIT_IO_DEFAULT);
+    photon::PhotonOptions photon_options;
+    photon_options.use_pooled_stack_allocator = true;
+    photon_options.bypass_threadpool = true;
+    photon::init(photon::INIT_EVENT_DEFAULT, photon::INIT_IO_DEFAULT, photon_options);
     photon::block_all_signal();
     photon::sync_signal(SIGTERM, &sigint_handler);
     photon::sync_signal(SIGINT, &sigint_handler);
@@ -450,6 +439,17 @@ int main(int argc, char **argv) {
         LOG_ERROR("failed to create image service");
         return -1;
     }
+
+    std::unique_ptr<photon::WorkPool> work_pool;
+    auto pool_size = imgservice->global_conf.workpoolSize();
+    if (pool_size == 0) {
+        LOG_WARN("workpoolSize is zero, using one worker");
+        pool_size = 1;
+    }
+    work_pool.reset(new photon::WorkPool(pool_size, photon::INIT_EVENT_EPOLL,
+                                         photon::INIT_IO_LIBCURL, 0));
+    device_work_pool = work_pool.get();
+    LOG_INFO("device work pool initialized with ` workers", pool_size);
 
     /*
      * Handings for rlimit and netlink are from tcmu-runner main.c
@@ -524,6 +524,8 @@ int main(int argc, char **argv) {
     tcmulib_close(tcmulib_ctx);
     LOG_INFO("tcmulib closed");
 
+    device_work_pool = nullptr;
+    work_pool.reset();
     delete imgservice;
     return 0;
 }
