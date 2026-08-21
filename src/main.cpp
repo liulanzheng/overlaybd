@@ -17,6 +17,9 @@
 #include "image_file.h"
 #include "image_service.h"
 #include "tools/comm_func.h"
+#include "libtcmu/libtcmu.h"
+#include "libtcmu/libtcmu_common.h"
+
 #include <photon/common/alog.h>
 #include <photon/common/event-loop.h>
 #include <photon/fs/filesystem.h>
@@ -25,10 +28,8 @@
 #include <photon/io/signal.h>
 #include <photon/photon.h>
 #include <photon/thread/thread.h>
-#include <photon/thread/thread-pool.h>
+#include <photon/thread/workerpool.h>
 
-#include <libtcmu.h>
-#include <libtcmu_common.h>
 #include <scsi.h>
 #include <scsi_defs.h>
 #include <fcntl.h>
@@ -36,6 +37,8 @@
 #include <sys/resource.h>
 #include <sys/prctl.h>
 #include <linux/netlink.h>
+#include <atomic>
+#include <memory>
 #include <string>
 
 class TCMUDevLoop;
@@ -45,21 +48,14 @@ class TCMUDevLoop;
 struct obd_dev {
     ImageFile *file;
     TCMUDevLoop *loop;
-    uint32_t aio_pending_wakeups;
-    uint32_t inflight;
-    std::thread *work;
-    photon::semaphore start, end;
+    std::atomic<uint32_t> inflight{0};
     std::string dev_id;
-};
-
-struct handle_args {
-    struct tcmu_device *dev;
-    struct tcmulib_cmd *cmd;
 };
 
 class TCMULoop;
 TCMULoop *main_loop = nullptr;
 ImageService *imgservice = nullptr;
+photon::WorkPool *io_work_pool = nullptr;
 
 class TCMULoop {
 protected:
@@ -149,8 +145,15 @@ again:
     goto again;
 }
 
+void complete_command(struct tcmu_device *dev, struct tcmulib_cmd *cmd,
+                      int result) {
+    tcmulib_command_complete(dev, cmd, result);
+    tcmulib_processing_complete(dev);
+}
+
 void cmd_handler(struct tcmu_device *dev, struct tcmulib_cmd *cmd) {
     obd_dev *odev = (obd_dev *)tcmu_dev_get_private(dev);
+    DEFER(odev->inflight.fetch_sub(1, std::memory_order_release));
     ImageFile *file = odev->file;
     size_t ret = -1;
     size_t length;
@@ -159,13 +162,13 @@ void cmd_handler(struct tcmu_device *dev, struct tcmulib_cmd *cmd) {
     case INQUIRY:
         photon::thread_yield();
         ret = tcmu_emulate_inquiry(dev, NULL, cmd->cdb, cmd->iovec, cmd->iov_cnt);
-        tcmulib_command_complete(dev, cmd, ret);
+        complete_command(dev, cmd, ret);
         break;
 
     case TEST_UNIT_READY:
         photon::thread_yield();
         ret = tcmu_emulate_test_unit_ready(cmd->cdb, cmd->iovec, cmd->iov_cnt);
-        tcmulib_command_complete(dev, cmd, ret);
+        complete_command(dev, cmd, ret);
         break;
 
     case SERVICE_ACTION_IN_16:
@@ -175,21 +178,21 @@ void cmd_handler(struct tcmu_device *dev, struct tcmulib_cmd *cmd) {
                                                 cmd->iovec, cmd->iov_cnt);
         else
             ret = TCMU_STS_NOT_HANDLED;
-        tcmulib_command_complete(dev, cmd, ret);
+        complete_command(dev, cmd, ret);
         break;
 
     case MODE_SENSE:
     case MODE_SENSE_10:
         photon::thread_yield();
         ret = tcmu_emulate_mode_sense(dev, cmd->cdb, cmd->iovec, cmd->iov_cnt);
-        tcmulib_command_complete(dev, cmd, ret);
+        complete_command(dev, cmd, ret);
         break;
 
     case MODE_SELECT:
     case MODE_SELECT_10:
         photon::thread_yield();
         ret = tcmu_emulate_mode_select(dev, cmd->cdb, cmd->iovec, cmd->iov_cnt);
-        tcmulib_command_complete(dev, cmd, ret);
+        complete_command(dev, cmd, ret);
         break;
 
     case READ_6:
@@ -200,9 +203,9 @@ void cmd_handler(struct tcmu_device *dev, struct tcmulib_cmd *cmd) {
         ret = sure({file, &ImageFile::preadv}, cmd->iovec, cmd->iov_cnt,
                    tcmu_cdb_to_byte(dev, cmd->cdb));
         if (ret == length) {
-            tcmulib_command_complete(dev, cmd, TCMU_STS_OK);
+            complete_command(dev, cmd, TCMU_STS_OK);
         } else {
-            tcmulib_command_complete(dev, cmd, TCMU_STS_RD_ERR);
+            complete_command(dev, cmd, TCMU_STS_RD_ERR);
         }
         break;
 
@@ -213,12 +216,12 @@ void cmd_handler(struct tcmu_device *dev, struct tcmulib_cmd *cmd) {
         length = tcmu_iovec_length(cmd->iovec, cmd->iov_cnt);
         ret = file->pwritev(cmd->iovec, cmd->iov_cnt, tcmu_cdb_to_byte(dev, cmd->cdb));
         if (ret == length) {
-            tcmulib_command_complete(dev, cmd, TCMU_STS_OK);
+            complete_command(dev, cmd, TCMU_STS_OK);
         } else {
             if (errno == EROFS) {
-                tcmulib_command_complete(dev, cmd, TCMU_STS_WR_ERR_INCOMPAT_FRMT);
+                complete_command(dev, cmd, TCMU_STS_WR_ERR_INCOMPAT_FRMT);
             } else {
-                tcmulib_command_complete(dev, cmd, TCMU_STS_WR_ERR);
+                complete_command(dev, cmd, TCMU_STS_WR_ERR);
             }
         }
         break;
@@ -227,9 +230,9 @@ void cmd_handler(struct tcmu_device *dev, struct tcmulib_cmd *cmd) {
     case SYNCHRONIZE_CACHE_16:
         ret = file->fdatasync();
         if (ret == 0) {
-            tcmulib_command_complete(dev, cmd, TCMU_STS_OK);
+            complete_command(dev, cmd, TCMU_STS_OK);
         } else {
-            tcmulib_command_complete(dev, cmd, TCMU_STS_WR_ERR);
+            complete_command(dev, cmd, TCMU_STS_WR_ERR);
         }
         break;
 
@@ -239,51 +242,26 @@ void cmd_handler(struct tcmu_device *dev, struct tcmulib_cmd *cmd) {
             length = tcmu_lba_to_byte(dev, tcmu_cdb_get_xfer_length(cmd->cdb));
             ret = file->fallocate(3, tcmu_cdb_to_byte(dev, cmd->cdb), length);
             if (ret == 0) {
-                tcmulib_command_complete(dev, cmd, TCMU_STS_OK);
+                complete_command(dev, cmd, TCMU_STS_OK);
             } else {
-                tcmulib_command_complete(dev, cmd, TCMU_STS_WR_ERR);
+                complete_command(dev, cmd, TCMU_STS_WR_ERR);
             }
         } else {
             LOG_ERROR("unknown write_same command `", cmd->cdb[0]);
-            tcmulib_command_complete(dev, cmd, TCMU_STS_NOT_HANDLED);
+            complete_command(dev, cmd, TCMU_STS_NOT_HANDLED);
         }
         break;
 
     case MAINTENANCE_IN:
     case MAINTENANCE_OUT:
-        tcmulib_command_complete(dev, cmd, TCMU_STS_NOT_HANDLED);
+        complete_command(dev, cmd, TCMU_STS_NOT_HANDLED);
         break;
 
     default:
         LOG_ERROR("unknown command `", cmd->cdb[0]);
-        tcmulib_command_complete(dev, cmd, TCMU_STS_NOT_HANDLED);
+        complete_command(dev, cmd, TCMU_STS_NOT_HANDLED);
         break;
     }
-
-    // call tcmulib_processing_complete(dev) if needed
-    ++odev->aio_pending_wakeups;
-    int wake_up = (odev->aio_pending_wakeups == 1) ? 1 : 0;
-    while (wake_up) {
-        tcmulib_processing_complete(dev);
-        photon::thread_yield();
-
-        if (odev->aio_pending_wakeups > 1) {
-            odev->aio_pending_wakeups = 1;
-            wake_up = 1;
-        } else {
-            odev->aio_pending_wakeups = 0;
-            wake_up = 0;
-        }
-    }
-
-    odev->inflight--;
-}
-
-void *handle(void *args) {
-    handle_args *obj = (handle_args *)args;
-    cmd_handler(obj->dev, obj->cmd);
-    delete obj;
-    return nullptr;
 }
 
 class TCMUDevLoop {
@@ -291,7 +269,6 @@ protected:
     struct tcmu_device *dev;
     EventLoop *loop;
     int fd;
-    photon::ThreadPool<32> threadpool;
 
     int wait_for_readable(EventLoop *) {
         auto ret = photon::wait_for_fd_readable(fd);
@@ -309,8 +286,10 @@ protected:
         obd_dev *odev = (obd_dev *)tcmu_dev_get_private(dev);
         tcmulib_processing_start(dev);
         while ((cmd = tcmulib_get_next_command(dev, 0)) != NULL) {
-            odev->inflight++;
-            threadpool.thread_create(&handle, new handle_args{dev, cmd});
+            odev->inflight.fetch_add(1, std::memory_order_relaxed);
+            io_work_pool->async_call(new auto([dev = dev, cmd] {
+                cmd_handler(dev, cmd);
+            }));
         }
         return 0;
     }
@@ -361,8 +340,6 @@ static int dev_open(struct tcmu_device *dev) {
     }
 
     obd_dev *odev = new obd_dev;
-    odev->aio_pending_wakeups = 0;
-    odev->inflight = 0;
     odev->file = file;
     odev->dev_id = dev_id;
 
@@ -373,27 +350,9 @@ static int dev_open(struct tcmu_device *dev) {
     tcmu_dev_set_write_cache_enabled(dev, false);
     tcmu_dev_set_write_protect_enabled(dev, file->read_only);
 
-    if (imgservice->global_conf.enableThread()) {
-        auto obd_th = [](obd_dev *odev, struct tcmu_device *dev) {
-            photon::init(photon::INIT_EVENT_EPOLL, photon::INIT_IO_LIBCURL);
-            DEFER(photon::fini());
-
-            odev->loop = new TCMUDevLoop(dev);
-            odev->loop->run();
-            LOG_INFO("obd device running");
-            odev->start.signal(1);
-
-            odev->end.wait(1);
-            delete odev->loop;
-            LOG_INFO("obd device exit");
-        };
-
-        odev->work = new std::thread(obd_th, odev, dev);
-        odev->start.wait(1);
-    } else {
-        odev->loop = new TCMUDevLoop(dev);
-        odev->loop->run();
-    }
+    odev->loop = new TCMUDevLoop(dev);
+    odev->loop->run();
+    LOG_INFO("obd device running");
 
     struct timeval end;
     gettimeofday(&end, NULL);
@@ -406,14 +365,9 @@ static int dev_open(struct tcmu_device *dev) {
 static int close_cnt = 0;
 static void dev_close(struct tcmu_device *dev) {
     obd_dev *odev = (obd_dev *)tcmu_dev_get_private(dev);
-    if (imgservice->global_conf.enableThread()) {
-        odev->end.signal(1);
-        if (odev->work->joinable()) {
-            odev->work->join();
-        }
-        delete odev->work;
-    } else {
-        delete odev->loop;
+    delete odev->loop;
+    while (odev->inflight.load(std::memory_order_acquire) != 0) {
+        photon::thread_usleep(1000);
     }
     delete odev->file;
     delete odev;
@@ -438,7 +392,10 @@ int main(int argc, char **argv) {
     mallopt(M_TRIM_THRESHOLD, 128 * 1024);
     prctl(PR_SET_THP_DISABLE, 1);
 
-    photon::init(photon::INIT_EVENT_DEFAULT, photon::INIT_IO_DEFAULT);
+    photon::PhotonOptions photon_options;
+    photon_options.use_pooled_stack_allocator = true;
+    photon_options.bypass_threadpool = true;
+    photon::init(photon::INIT_EVENT_DEFAULT, photon::INIT_IO_DEFAULT, photon_options);
     photon::block_all_signal();
     photon::sync_signal(SIGTERM, &sigint_handler);
     photon::sync_signal(SIGINT, &sigint_handler);
@@ -450,6 +407,17 @@ int main(int argc, char **argv) {
         LOG_ERROR("failed to create image service");
         return -1;
     }
+
+    std::unique_ptr<photon::WorkPool> work_pool;
+    auto pool_size = imgservice->global_conf.workpoolSize();
+    if (pool_size == 0) {
+        LOG_WARN("workpoolSize is zero, using one worker");
+        pool_size = 1;
+    }
+    work_pool.reset(new photon::WorkPool(pool_size, photon::INIT_EVENT_EPOLL,
+                                         photon::INIT_IO_LIBCURL, 0));
+    io_work_pool = work_pool.get();
+    LOG_INFO("I/O work pool initialized with ` workers", pool_size);
 
     /*
      * Handings for rlimit and netlink are from tcmu-runner main.c
@@ -524,6 +492,8 @@ int main(int argc, char **argv) {
     tcmulib_close(tcmulib_ctx);
     LOG_INFO("tcmulib closed");
 
+    io_work_pool = nullptr;
+    work_pool.reset();
     delete imgservice;
     return 0;
 }
