@@ -50,6 +50,19 @@ supposed to be referenced by the index entries. And it's possible for this secti
 to contain garbage data blocks that are not referenced by the any entry of the
 index.
 
+Compaction inserts zero padding before each non-zero local data extent so
+that `moffset % 8 == offset % 8`: physical and logical byte offsets have the
+same remainder modulo 4096. Extent starts are not necessarily 4 KiB aligned.
+After the data, zero padding aligns the index start to 4096 bytes. Padding
+adds at most 3584 bytes before each extent. Explicit zero extents remain
+index-only, and remote mappings keep their original offsets. Mapping units
+remain 512-byte sectors and the wire format is unchanged.
+
+Complete 4 KiB logical pages contained in one extent can then be mapped from
+page-aligned offsets in an uncompressed layer file. Pages combining different
+sources or non-contiguous file ranges still need assembly. Existing layers
+are not realigned.
+
 
 ## index
 The index section is a table that associates logical block addressing (LBA) with
