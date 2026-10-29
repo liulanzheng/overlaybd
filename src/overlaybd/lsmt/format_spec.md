@@ -50,18 +50,19 @@ supposed to be referenced by the index entries. And it's possible for this secti
 to contain garbage data blocks that are not referenced by the any entry of the
 index.
 
-Compaction inserts zero padding before each non-zero local data extent so
-that `moffset % 8 == offset % 8`: physical and logical byte offsets have the
-same remainder modulo 4096. Extent starts are not necessarily 4 KiB aligned.
-After the data, zero padding aligns the index start to 4096 bytes. Padding
-adds at most 3584 bytes before each extent. Explicit zero extents remain
-index-only, and remote mappings keep their original offsets. Mapping units
-remain 512-byte sectors and the wire format is unchanged.
+Compaction groups local data by logical 4 KiB page. Each logical page with
+local data occupies one complete physical page, preserving the offset within
+the page (`moffset % 8 == offset % 8`). Multiple extents in the same logical
+page share that physical page. Unmapped bytes are zero-filled without adding
+index entries, so holes still fall through to lower layers. Explicit zero
+extents remain index-only, and remote mappings keep their original offsets.
+The index starts on a 4096-byte boundary. Mapping units remain 512-byte
+sectors and the wire format is unchanged.
 
-Complete 4 KiB logical pages contained in one extent can then be mapped from
-page-aligned offsets in an uncompressed layer file. Pages combining different
-sources or non-contiguous file ranges still need assembly. Existing layers
-are not realigned.
+A complete logical page backed by local data can then be mapped directly from
+an uncompressed layer file, even when its data came from several input
+extents. Pages that still require data from lower layers or remote sources
+need assembly. Existing layers are not realigned.
 
 
 ## index

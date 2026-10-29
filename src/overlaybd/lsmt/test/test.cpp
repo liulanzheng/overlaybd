@@ -115,8 +115,10 @@ void lookup_test(IMemoryIndex &idx);
 
 static void check_compact_layout(IFileRW *rw, IFile *dest, bool warp,
                                  const std::string &dest_path) {
-    SegmentMapping extents[] = {{1, 1, 0}, {8, 1, 0}, {12, 3, 0}, {17, 80, 0}};
+    SegmentMapping extents[] = {{1, 1, 0}, {3, 1, 0}, {4, 1, 0}, {6, 1, 0},
+                                {8, 1, 0}, {12, 3, 0}, {17, 80, 0}};
     extents[2].discard();
+    extents[5].discard();
     vector<char> expected(104 * ALIGNMENT, 0);
     for (size_t i = 0; i < LEN(extents); ++i) {
         auto &m = extents[i];
@@ -142,6 +144,7 @@ static void check_compact_layout(IFileRW *rw, IFile *dest, bool warp,
     ASSERT_EQ((ssize_t)bytes, dest->pread(index.data(), bytes, ht->index_offset));
     uint64_t cursor = HeaderTrailer::SPACE;
     vector<char> payload;
+    vector<uint64_t> physical_pages(expected.size() / ALIGNMENT4K, 0);
     size_t n = 0;
     int fd = ::open(dest_path.c_str(), O_RDONLY);
     ASSERT_GE(fd, 0);
@@ -154,11 +157,20 @@ static void check_compact_layout(IFileRW *rw, IFile *dest, bool warp,
         EXPECT_EQ(extents[n].offset + 0, m.offset + 0);
         EXPECT_EQ(extents[n].length + 0, m.length + 0);
         EXPECT_EQ(extents[n].zeroed + 0, m.zeroed + 0);
-        if (!m.zeroed)
-            cursor += (m.offset * ALIGNMENT % ALIGNMENT4K + ALIGNMENT4K -
-                       cursor % ALIGNMENT4K) % ALIGNMENT4K;
-        EXPECT_EQ(cursor, m.moffset * ALIGNMENT);
         if (!m.zeroed) {
+            // Separate extents in the same logical page must share an output page.
+            for (uint64_t sector = m.offset; sector < m.end(); ++sector) {
+                auto &base = physical_pages[sector / 8];
+                if (!base) {
+                    base = cursor;
+                    cursor += ALIGNMENT4K;
+                    payload.resize(cursor - HeaderTrailer::SPACE, 0);
+                }
+                auto physical = base + sector % 8 * ALIGNMENT;
+                EXPECT_EQ(physical, (m.moffset + sector - m.offset) * ALIGNMENT);
+                memcpy(payload.data() + physical - HeaderTrailer::SPACE,
+                       expected.data() + sector * ALIGNMENT, ALIGNMENT);
+            }
             EXPECT_EQ(m.offset % 8, m.moffset % 8);
             uint64_t logical_begin = m.offset * ALIGNMENT;
             uint64_t logical_end = m.end() * ALIGNMENT;
@@ -177,10 +189,6 @@ static void check_compact_layout(IFileRW *rw, IFile *dest, bool warp,
                     ++mapped_pages;
                 }
             }
-            payload.resize(cursor - HeaderTrailer::SPACE + m.length * ALIGNMENT, 0);
-            memcpy(payload.data() + cursor - HeaderTrailer::SPACE,
-                   expected.data() + m.offset * ALIGNMENT, m.length * ALIGNMENT);
-            cursor += m.length * ALIGNMENT;
         }
         ++n;
     }
@@ -209,6 +217,68 @@ TEST_F(FileTest, compact_page_offsets) {
     ASSERT_NE(nullptr, rw);
     ASSERT_NE(nullptr, dest);
     check_compact_layout(rw.get(), dest.get(), false, "/tmp/" + layer_name.back());
+}
+
+TEST_F(FileTest, compact_page_holes_and_flatten) {
+    unique_ptr<IFileRW> lower_rw(create_file_rw());
+    ASSERT_NE(nullptr, lower_rw);
+    vector<char> expected(ALIGNMENT4K, 0x11);
+    ASSERT_EQ((ssize_t)expected.size(), lower_rw->pwrite(expected.data(), expected.size(), 0));
+    unique_ptr<IFile> lower(lfs->open(layer_name.back().c_str(),
+                                    O_RDWR | O_CREAT | O_TRUNC, S_IRWXU));
+    ASSERT_NE(nullptr, lower);
+    ASSERT_EQ(0, lower_rw->commit(CommitArgs(lower.get())));
+
+    unique_ptr<IFileRW> upper_rw(create_file_rw());
+    ASSERT_NE(nullptr, upper_rw);
+    for (auto sector : {1, 3, 6}) {
+        memset(expected.data() + sector * ALIGNMENT, 0x22, ALIGNMENT);
+        ASSERT_EQ((ssize_t)ALIGNMENT,
+                  upper_rw->pwrite(expected.data() + sector * ALIGNMENT, ALIGNMENT,
+                                   sector * ALIGNMENT));
+    }
+    ASSERT_EQ(0, upper_rw->fallocate(3, 4 * ALIGNMENT, ALIGNMENT));
+    memset(expected.data() + 4 * ALIGNMENT, 0, ALIGNMENT);
+    unique_ptr<IFile> upper(lfs->open(layer_name.back().c_str(),
+                                    O_RDWR | O_CREAT | O_TRUNC, S_IRWXU));
+    ASSERT_NE(nullptr, upper);
+    ASSERT_EQ(0, upper_rw->commit(CommitArgs(upper.get())));
+    IFile *layers[] = {lower.get(), upper.get()};
+    unique_ptr<IFileRO> stacked(open_files_ro(layers, LEN(layers), false));
+    ASSERT_NE(nullptr, stacked);
+    vector<char> actual(ALIGNMENT4K);
+    ASSERT_EQ((ssize_t)actual.size(), stacked->pread(actual.data(), actual.size(), 0));
+    EXPECT_EQ(expected, actual); // Padding must not hide the lower layer's sectors.
+
+    name_next_layer();
+    auto path = "/tmp/" + layer_name.back();
+    unique_ptr<IFile> flat(lfs->open(layer_name.back().c_str(),
+                                   O_RDWR | O_CREAT | O_TRUNC, S_IRWXU));
+    ASSERT_NE(nullptr, flat);
+    ASSERT_EQ(0, stacked->flatten(flat.get()));
+    unique_ptr<IFileRO> ro(LSMT::open_file_ro(flat.get(), false));
+    ASSERT_NE(nullptr, ro);
+    ASSERT_EQ((ssize_t)actual.size(), ro->pread(actual.data(), actual.size(), 0));
+    EXPECT_EQ(expected, actual);
+    // All local fragments, including those from different input layers, share
+    // one physical page. The explicit zero sector is physically zero padding.
+    ASSERT_EQ((ssize_t)actual.size(), flat->pread(actual.data(), actual.size(), HeaderTrailer::SPACE));
+    EXPECT_EQ(expected, actual);
+    ALIGNED_MEM4K(trailer, HeaderTrailer::SPACE);
+    auto end = flat->lseek(0, SEEK_END);
+    ASSERT_EQ((ssize_t)HeaderTrailer::SPACE,
+              flat->pread(trailer, HeaderTrailer::SPACE, end - HeaderTrailer::SPACE));
+    EXPECT_EQ(2 * ALIGNMENT4K, ((HeaderTrailer *)trailer)->index_offset + 0);
+    if (::sysconf(_SC_PAGESIZE) == ALIGNMENT4K) {
+        int fd = ::open(path.c_str(), O_RDONLY);
+        ASSERT_GE(fd, 0);
+        DEFER(::close(fd));
+        void *mapped = ::mmap(nullptr, ALIGNMENT4K, PROT_READ, MAP_SHARED,
+                              fd, HeaderTrailer::SPACE);
+        ASSERT_NE(MAP_FAILED, mapped);
+        EXPECT_EQ(0, memcmp(mapped, expected.data(), ALIGNMENT4K));
+        EXPECT_EQ(0, ::munmap(mapped, ALIGNMENT4K));
+    }
 }
 
 TEST(Index, lookup) {

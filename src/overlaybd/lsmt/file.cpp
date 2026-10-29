@@ -296,111 +296,61 @@ struct CompactOptions {
     };
 };
 
-static int push_segment(char *buf, char *data, int &data_length, int &prev_end, int zero_detect,
-                        SegmentMapping &s, vector<SegmentMapping> &index) {
-    auto start_moffset = s.moffset;
-    if (zero_detect == 1)
-        s.discard();
-    else {
-        memcpy(data + data_length, buf + prev_end * ALIGNMENT, s.length * ALIGNMENT);
-        data_length += s.length * ALIGNMENT;
-    }
-    prev_end += s.length;
-    LOG_DEBUG("push ", s, ' ', VALUE(data_length));
-    index.push_back(s);
-    start_moffset = s.mend();
-    s.zeroed = 0;
-    s.offset = s.end();
-    s.length = 0;
-    s.moffset = start_moffset;
-    return 0;
-}
+// Pack all local data from one logical page into one physical page. Holes
+// are zero-filled in the payload, but must not acquire index entries.
+class CompactPageWriter {
+    const CompactOptions &opt;
+    vector<SegmentMapping> &index;
+    uint64_t moffset;
+    uint64_t logical_page = 0;
+    bool pending = false;
+    alignas(4096) char page[ALIGNMENT4K];
 
-static int is_zero_block(char *buf, size_t n) {
-    return 1;
-    // TODO: fixme: result data error
-    if (n & (sizeof(uint64_t) - 1)) {
-        LOG_ERROR("buf size invalid.");
-        return -1;
-    }
-    for (uint64_t j = 0; j < n; j += sizeof(uint64_t)) {
-        if ((uint64_t)(*(buf + j)) == (uint64_t)0)
-            continue;
-        return 1;
-    }
-    return 0;
-}
+public:
+    CompactPageWriter(const CompactOptions &options, vector<SegmentMapping> &mappings,
+                      uint64_t start)
+        : opt(options), index(mappings), moffset(start) {}
 
-// Offsets and the return value are in 512-byte sectors. Preserve the logical
-// offset within a 4 KiB page so complete logical pages can be mapped directly.
-static ssize_t pad_compact_data(IFile *dest, uint64_t moffset, uint64_t offset) {
-    const uint64_t sectors_per_page = ALIGNMENT4K / ALIGNMENT;
-    auto padding = (offset % sectors_per_page + sectors_per_page -
-                    moffset % sectors_per_page) % sectors_per_page;
-    if (padding) {
-        ALIGNED_MEM4K(zeros, ALIGNMENT4K);
-        memset(zeros, 0, ALIGNMENT4K);
-        auto bytes = padding * ALIGNMENT;
-        if (dest->write(zeros, bytes) != (ssize_t)bytes)
-            LOG_ERRNO_RETURN(0, -1, "failed to write compact padding");
-    }
-    return padding;
-}
+    uint64_t offset() const { return moffset; }
 
-static ssize_t pcopy(const CompactOptions &opt, const SegmentMapping &m, uint64_t moffset,
-                     vector<SegmentMapping> &index) {
-    auto padding = pad_compact_data(opt.commit_args->as, moffset, m.offset);
-    if (padding < 0)
-        return -1;
-    moffset += padding;
-    auto offset = m.moffset * ALIGNMENT;
-    auto count = m.length * ALIGNMENT;
-    auto bytes = padding * ALIGNMENT;
-    const size_t BUFFER_SIZE = 32 * 1024;
-    ALIGNED_MEM4K(buf, BUFFER_SIZE);
-    ALIGNED_MEM4K(data, BUFFER_SIZE);
-    LOG_DEBUG("check segment: [ offset: `, len: `, moffset: `]", m.offset, m.length, m.moffset);
-    SegmentMapping s{m.offset, 0, moffset, m.tag};
-    while (count > 0) {
-        ssize_t step = min((size_t)count, BUFFER_SIZE /* BUFFER_SIZE 32K */);
-        LOG_DEBUG("read from src_file, offset: `, step: `", offset, step);
-        ssize_t ret = opt.src_files[m.tag]->pread(buf, step, offset);
-        if (ret < (ssize_t)step)
-            LOG_ERRNO_RETURN(0, -1, "failed to read from file");
-        auto zero_detected = -1;
-        auto data_length = 0;
-        auto prev_end = 0;
-        for (auto i = 0; i < step; i += (ssize_t)ALIGNMENT) {
-            if (is_zero_block(buf + i, ALIGNMENT) == 0) {
-                if (zero_detected == 0 && s.length) {
-                    push_segment(buf, data, data_length, prev_end, zero_detected, s, index);
-                }
-                s.length++;
-                zero_detected = 1;
-                continue;
+    int flush() {
+        if (!pending)
+            return 0;
+        if (opt.commit_args->as->write(page, sizeof(page)) != (ssize_t)sizeof(page))
+            LOG_ERRNO_RETURN(0, -1, "failed to write compact page");
+        moffset += ALIGNMENT4K / ALIGNMENT;
+        pending = false;
+        return 0;
+    }
+
+    int copy(const SegmentMapping &m) {
+        const uint64_t sectors_per_page = ALIGNMENT4K / ALIGNMENT;
+        uint64_t offset = m.offset;
+        uint64_t start_moffset = 0;
+        while (offset < m.end()) {
+            auto next_page = offset / sectors_per_page;
+            if (pending && logical_page != next_page && flush() < 0)
+                return -1;
+            if (!pending) {
+                memset(page, 0, sizeof(page));
+                logical_page = next_page;
+                pending = true;
             }
-            if (zero_detected == 1) {
-                push_segment(buf, data, data_length, prev_end, zero_detected, s, index);
-            }
-            zero_detected = 0;
-            s.length++;
+            auto in_page = offset % sectors_per_page;
+            auto length = min(uint64_t(m.end() - offset), sectors_per_page - in_page);
+            auto bytes = length * ALIGNMENT;
+            auto source = (m.moffset + offset - m.offset) * ALIGNMENT;
+            if (opt.src_files[m.tag]->pread(page + in_page * ALIGNMENT, bytes, source) !=
+                (ssize_t)bytes)
+                LOG_ERRNO_RETURN(0, -1, "failed to read compact data");
+            if (offset == m.offset)
+                start_moffset = moffset + in_page;
+            offset += length;
         }
-        if (s.length) {
-            push_segment(buf, data, data_length, prev_end, zero_detected, s, index);
-        }
-        /* write non-zeroed data */
-        LOG_DEBUG("write valid data(size: `)", data_length);
-        if (data_length) {
-            ret = opt.commit_args->as->write(data, data_length);
-            if (ret < (ssize_t)data_length)
-                LOG_ERROR_RETURN(0, -1, "failed to write to file");
-        }
-        bytes += data_length;
-        offset += step;
-        count -= step;
+        index.push_back(SegmentMapping{m.offset, m.length, start_moffset, m.tag});
+        return 0;
     }
-    return bytes / ALIGNMENT;
-}
+};
 
 static int load_layer_info(IFile **src_files, size_t n, LayerInfo &layer, bool oper_seal = false) {
     ALIGNED_MEM(buf_top, HeaderTrailer::SPACE, ALIGNMENT4K);
@@ -469,23 +419,21 @@ static int compact(const CompactOptions &opt, atomic_uint64_t &compacted_idx_siz
     uint64_t moffset = HeaderTrailer::SPACE;
     vector<SegmentMapping> compact_index;
     moffset /= ALIGNMENT;
+    CompactPageWriter writer(opt, compact_index, moffset);
     for (auto &m : marray) {
         compacted_idx_size.fetch_add(1);
         if (m.zeroed) {
-            m.moffset = moffset;
+            m.moffset = writer.offset();
             compact_index.push_back(m);
-            // there is no need do pcopy if current block is zero-marked.
+            // Zero extents have no payload.
             continue;
         }
-        auto ret = pcopy(opt, m, moffset, compact_index);
-        if (ret < 0)
-            return (int)ret;
-        moffset += ret;
+        if (writer.copy(m) < 0)
+            return -1;
     }
-    auto padding_sectors = pad_compact_data(dest_file, moffset, 0);
-    if (padding_sectors < 0)
+    if (writer.flush() < 0)
         return -1;
-    uint64_t index_offset = (moffset + padding_sectors) * ALIGNMENT;
+    uint64_t index_offset = writer.offset() * ALIGNMENT;
     auto index_size = compress_raw_index(&compact_index[0], compact_index.size());
     LOG_DEBUG("write index to dest_file `, size: `*`", dest_file, index_size,
               sizeof(SegmentMapping));
@@ -1579,6 +1527,7 @@ public:
         vector<SegmentMapping> compact_index;
         size_t compacted_idx_size = 0;
         moffset /= ALIGNMENT;
+        CompactPageWriter writer(opts, compact_index, moffset);
         for (auto &m : marray) {
             if (m.tag == (uint8_t)SegmentType::remoteData) {
                 compact_index.push_back(m);
@@ -1587,20 +1536,17 @@ public:
             }
             compacted_idx_size++;
             if (m.zeroed) {
-                m.moffset = moffset;
+                m.moffset = writer.offset();
                 compact_index.push_back(m);
-                // there is no need do pcopy if current block is zero-marked.
+                // Zero extents have no payload.
                 continue;
             }
-            auto ret = pcopy(opts, m, moffset, compact_index);
-            if (ret < 0)
-                return (int)ret;
-            moffset += ret;
+            if (writer.copy(m) < 0)
+                return -1;
         }
-        auto padding_sectors = pad_compact_data(dest_file, moffset, 0);
-        if (padding_sectors < 0)
+        if (writer.flush() < 0)
             return -1;
-        uint64_t index_offset = (moffset + padding_sectors) * ALIGNMENT;
+        uint64_t index_offset = writer.offset() * ALIGNMENT;
         auto index_size = compress_raw_index(&compact_index[0], compact_index.size());
         LOG_DEBUG("write index to dest_file `, offset: `, size: `*`", dest_file, index_offset,
                   index_size, sizeof(SegmentMapping));
